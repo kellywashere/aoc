@@ -19,11 +19,26 @@ enum op {
 
 struct gate {
 	enum op      op;
-	int          in1; // <0: -idx of wire, >=0: nr
+	int          in1; // <0: -idx-1 of wire, >=0: nr
 	int          in2; // not used in some ops
-	int          out; // -idx output wire (neg for consistency...)
+	int          out; // -idx-1 output wire (neg for consistency...)
 	struct gate* next; // for linked list
 };
+
+struct wire {
+	int known_bits; // mask of resolved bits
+	int value;
+};
+
+// debug:
+void print_wire(struct wire* w) {
+	printf("v:%04X, k:%04X --> ", w->value, w->known_bits);
+	for (int b = 15; b >= 0; --b) {
+		bool k = ((w->known_bits >> b) & 1);
+		int v = ((w->value >> b) & 1);
+		fputc(k ? (v + '0') : '?', stdout);
+	}
+}
 
 //debug:
 void print_wirename(int idx) {
@@ -35,6 +50,7 @@ void print_wirename(int idx) {
 	}
 }
 
+//debug:
 void print_operand(int o) {
 	if (o >= 0)
 		printf("%d", o);
@@ -62,12 +78,14 @@ void print_gate(struct gate* g) {
 	fputc('\n', stdout);
 }
 
-struct wire {
-	int known_bits; // mask of resolved bits
-	int value;
-};
+bool all_whitespace(const char* str) {
+	while (*str == ' ' || *str == '\t' || *str == '\n')
+		++str;
+	return *str == '\0';
+}
 
 int wirename_to_idx(const char* name) {
+	// returns 0..701
 	char c1 = *name;
 	char c2 = *(name + 1);
 	if (c2 >= 'a' && c2 <='z')
@@ -77,6 +95,8 @@ int wirename_to_idx(const char* name) {
 }
 
 int parse_operand(const char* str) {
+	// when nr, returns that nr
+	// when wire name, returns -idx - 1
 	while (*str == ' ' || *str == '\t' || *str == '\n')
 		++str;
 	if (*str >= '0' && *str <= '9')
@@ -88,6 +108,8 @@ int parse_operand(const char* str) {
 struct gate* parse_line(const char* line) {
 	struct gate* gate = malloc(sizeof(struct gate));
 	gate->next = NULL;
+	gate->in1 = 0;
+	gate->in2 = 0;
 
 	char* arrowloc = strstr(line, "->");
 	if (arrowloc == NULL) {
@@ -95,6 +117,10 @@ struct gate* parse_line(const char* line) {
 		return NULL;
 	}
 	gate->out = parse_operand(arrowloc + 2);
+	if (gate->out >= 0) {
+		fprintf(stderr, "Gate output should always be wire name: %s", line);
+		return NULL;
+	}
 
 	char* oploc;
 	if (!strncmp(line, "NOT", 3)) {
@@ -128,6 +154,67 @@ struct gate* parse_line(const char* line) {
 	return gate;
 }
 
+bool process_gate(struct gate* gate, struct wire* wires) {
+	struct wire* w_out = wires + (-gate->out - 1);
+	struct wire* w_in1 = gate->in1 < 0 ? wires + (-gate->in1 - 1) : NULL;
+	struct wire* w_in2 = gate->in2 < 0 ? wires + (-gate->in2 - 1) : NULL;
+	int v1 = gate->in1 < 0 ? w_in1->value : gate->in1;
+	int v2 = gate->in2 < 0 ? w_in2->value : gate->in2;
+	int k1 = gate->in1 < 0 ? w_in1->known_bits : 0xFFFF;
+	int k2 = gate->in2 < 0 ? w_in2->known_bits : 0xFFFF;
+	int kout_before = w_out->known_bits;
+
+	switch (gate->op) {
+		case NOP:
+			w_out->known_bits = k1;
+			w_out->value = v1;
+			break;
+		case NOT:
+			w_out->known_bits = k1;
+			w_out->value = ~v1;
+			break;
+		case LSHIFT:
+			w_out->known_bits = k1 << v2;
+			w_out->known_bits |= (1 << v2) - 1; // we know last v2 bits are 0
+			w_out->value = v1 << v2;
+			break;
+		case RSHIFT:
+			w_out->known_bits = k1 >> v2;
+			w_out->known_bits |= 0xFFFF << (16 - v2); // we know first v2 bits are 0
+			w_out->value = v1 >> v2;
+			break;
+		case AND:
+			// ? * ? = ?              v1 k1  v2 k2  vo ko 
+			// 0 * ? = ? * 0 = 0       -  0   -  0   -  0
+			// 1 * ? = ? * 1 = ?       0  1   -  -   0  1
+			// 1 * 1 = 1               -  -   0  1   0  1
+			//                         1  1   -  0   -  0
+			//                         -  0   1  1   -  0
+			//                         1  1   1  1   1  1
+			// So: vo = v1*k1*v2*k2
+			// and ko = ~v1*k1 + ~v2*k2 + v1*k1*v2*k2
+			w_out->value = v1 & k1 & v2 & k2;
+			w_out->known_bits = (~v1 & k1) | (~v2 & k2) | w_out->value;
+			break;
+		case OR:
+			// ? + ? = ?              v1 k1  v2 k2  vo ko 
+			// 0 + ? = ? + 0 = ?       -  0   -  0   -  0
+			// 1 + ? = ? + 1 = 1       1  1   -  -   1  1
+			// 0 + 0 = 0               -  -   1  1   1  1
+			//                         0  1   -  0   -  0
+			//                         -  0   0  1   -  0
+			//                         0  1   0  1   0  1
+			// So: vo = v1*k1 + v2*k2
+			// and ko = v1*k1 + v2*k2 + ~v1*k1*~v2*k2
+			w_out->value = (v1 & k1) |  (v2 & k2);
+			w_out->known_bits = (~v1 & k1 & ~v2 & k2) | w_out->value;
+			break;
+	}
+	w_out->value &= 0xFFFF;
+	w_out->known_bits &= 0xFFFF;
+	return kout_before != w_out->known_bits; // return true if we learned something
+}
+
 int main(int argc, char* argv[]) {
 	int ii;
 	// create wires with unknown value
@@ -141,19 +228,44 @@ int main(int argc, char* argv[]) {
 	size_t len = 0;
 	struct gate* head = NULL; // head of linked list
 	while (getline(&line, &len, stdin) != -1) {
+		if (all_whitespace(line))
+			continue;
 		struct gate* gate = parse_line(line);
 		gate->next = head; // stick new gate in front of list
 		head = gate;
-		fputs(line, stdout);
-		print_gate(gate);
 	}
 	free(line);
-	
+
+	// now repeatedly iterate over all gates, until wite `a` is known
+	bool learned = true;
+	while (learned) {
+		learned = false;
+		for (struct gate* gate = head; gate != NULL; gate = gate->next) {
+			learned = process_gate(gate, wires) || learned;
+		}
+	}
+
+	// debug:
+	for (int idx = 0; idx <= 701; ++idx) {
+		if (wires[idx].known_bits) {
+			print_wirename(idx);
+			printf(" = %d", wires[idx].value);
+			if (wires[idx].known_bits != 0xFFFF)
+				fputs(" ??????", stdout);
+			fputc('\n', stdout);
+		}
+	}
+
+	// print answer
+	int idx_a = wirename_to_idx("a");
+	printf("%d\n", wires[idx_a].value);
+
 	// clean up
 	while (head) {
 		struct gate* gate = head;
 		head = gate->next;
 		free(gate);
 	}
+	free(wires);
 	return 0;
 }
