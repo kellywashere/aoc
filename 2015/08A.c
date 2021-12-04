@@ -3,8 +3,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define GRIDSIZE 1000
-
 int count_delta(const char* str) {
 	int count = 0;
 	while (*str != '"')
