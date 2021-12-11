@@ -150,47 +150,31 @@ void apply_rule_backward_inplace(char* m, int idx, struct rule* r) {
 	// printf("out molecule: %s\n", m - idx);
 }
 
-
-// debug:
-int g_shortest_len;
-
-int count_steps_rec(char* m, struct rule* rules, char* target, int depth, int* best_depth) {
-	if (*best_depth > 0 && depth >= *best_depth)
-		return -1;
-	if (!strcmp(m, target)) {
-		printf("Found target after %d steps\n", depth);
-		*best_depth = depth;
-		return depth;
-	}
-	
-	int lm = strlen(m);
-	if (g_shortest_len == -1 || lm < g_shortest_len) {
-		g_shortest_len = lm;
-		printf("Shortest len: %d\n", g_shortest_len);
-	}
+int count_steps_rec(char* m, struct rule* rules, char* target) {
+	if (!strcmp(m, target))
+		return 0;
 
 	struct rule* r = rules;
-	int best = -1;
-	while (r) {
+	bool found = false;
+	int steps;
+	while (!found && r != NULL) {
 		char* loc = strstr(m, r->m);
 		if (loc) {
 			apply_rule_backward_inplace(m, loc - m, r);
-			int steps = count_steps_rec(m, rules, target, depth + 1, best_depth);
-			if (steps >= 0) {
-				if (best < 0 || steps < best)
-					best = steps;
+			steps = count_steps_rec(m, rules, target);
+			if (steps >= 0) { // found target
+				++steps; // include last replacement itself
+				found = true;
 			}
 			apply_rule_inplace(m, loc - m, r);
 		}
 		r = r->next;
 	}
-	return best;
+	return found ? steps : -1;
 }
 
 int count_steps(char* m, struct rule* rules, char* target) {
-	g_shortest_len = strlen(m);
-	int best_depth = -1;
-	return count_steps_rec(m, rules, target, 0, &best_depth);
+	return count_steps_rec(m, rules, target);
 }
 
 int main(int argc, char* argv[]) {
@@ -209,12 +193,12 @@ int main(int argc, char* argv[]) {
 		r->next = rules;
 		rules = r;
 	}
+	// sort rules longest m to shortest m, for greedy search-and-replace
 	rules = mergesort_rules(rules);
 
 	char target[2]; // target string
 	target[0] = atom_to_idx("e", atoms) + 'a';
 	target[1] = '\0';
-	printf("Target: %s\n", target);
 	// read calibration modecule
 	char* m = NULL;
 	while (getline(&line, &len, stdin) != -1) {
