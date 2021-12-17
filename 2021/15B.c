@@ -177,6 +177,7 @@ void print_grid(struct grid* g) {
 }
 
 int min_path_sum(struct grid* g) {
+	struct minheap* minheap = create_minheap();
 	int nr_nodes = g->w * g->h;
 	int nr_nodes_visited = 0;
 	// Dijkstra
@@ -187,49 +188,48 @@ int min_path_sum(struct grid* g) {
 	int current_row = 0;
 	int current_col = 0;
 	int target_idx = (g->h - 1) * g->w + (g->w - 1);
+	minheap_insert(minheap, cost[0], 0);
 	while (!visited[target_idx]) {
+		int idx;
+		// find unvisited node with lowest cost
+		minheap_extract(minheap, &idx);
+		current_row = idx / g->w;
+		current_col = idx % g->w;
 		// printf("Now at (%d, %d)\n", current_row, current_col);
-		int idx = current_row * g->w + current_col;
+		visited[idx] = true;
+		++nr_nodes_visited;
+
 		int c = cost[idx];
 		if (current_col > 0 && !visited[idx - 1]) {
 			if (cost[idx - 1] == 0 || c + g->grid[idx - 1] < cost[idx - 1]) {
 				cost[idx - 1] = c + g->grid[idx - 1];
+				minheap_insert(minheap, cost[idx - 1], idx - 1);
 			}
 		}
 		if (current_row > 0 && !visited[idx - g->w]) {
 			if (cost[idx - g->w] == 0 || c + g->grid[idx - g->w] < cost[idx - g->w]) {
 				cost[idx - g->w] = c + g->grid[idx - g->w];
+				minheap_insert(minheap, cost[idx - g->w], idx - g->w);
 			}
 		}
 		if (current_col < g->w - 1 && !visited[idx + 1]) {
 			if (cost[idx + 1] == 0 || c + g->grid[idx + 1] < cost[idx + 1]) {
 				cost[idx + 1] = c + g->grid[idx + 1];
+				minheap_insert(minheap, cost[idx + 1], idx + 1);
 			}
 		}
 		if (current_row < g->h - 1 && !visited[idx + g->w]) {
 			if (cost[idx + g->w] == 0 || c + g->grid[idx + g->w] < cost[idx + g->w]) {
 				cost[idx + g->w] = c + g->grid[idx + g->w];
-			}
-		}
-		visited[idx] = true;
-		++nr_nodes_visited;
-		if (nr_nodes_visited % 1000 == 0)
-			printf("Nodes visited: %d\n", nr_nodes_visited);
-		// find unvisited node with lowest cost
-		c = 0;
-		int row, col;
-		for (row = 0; row < g->h; ++row) {
-			for (col = 0; col < g->w; ++col) {
-				idx = row * g->w + col;
-				if (!visited[idx] && (cost[idx] > 0 && (c == 0 || cost[idx] < c))) {
-					current_row = row;
-					current_col = col;
-					c = cost[idx];
-				}
+				minheap_insert(minheap, cost[idx + g->w], idx + g->w);
 			}
 		}
 	}
-	return cost[target_idx];
+	int totcost = cost[target_idx];
+	free(visited);
+	free(cost);
+	destroy_minheap(minheap);
+	return totcost;
 }
 
 struct grid* expand_grid(struct grid* g) {
