@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <inttypes.h>
 
 #define LITERAL_VALUE 4
 
@@ -12,7 +13,7 @@ void* mymalloc(size_t size) {
 	return p;
 }
 
-#define is_hexdigit(c) (((c)>='0' && (c)<'9') || ((c)>='A' && (c)<='F'))
+#define is_hexdigit(c) (((c)>='0' && (c)<='9') || ((c)>='A' && (c)<='F'))
 
 struct binstr {
 	char* str;
@@ -50,15 +51,13 @@ int read_bits(struct binstr* bstr, int len) {
 	return x;
 }
 
-int read_literal_value(struct binstr* bstr) {
-	int litval = 0;
+uint64_t read_literal_value(struct binstr* bstr) {
+	uint64_t litval = 0;
 	int b;
 	do {
 		b = read_bits(bstr, 5);
 		litval = (litval << 4) + (b & 0x0F);
 	} while ( (b & 0x10) );
-	// make sure binstr idx is mult of 4
-	bstr->idx = ((bstr->idx + 3) / 4) * 4;
 	return litval;
 }
 
@@ -68,7 +67,7 @@ struct operator {
 };
 
 union content {
-	int             literal;
+	uint64_t        literal;
 	struct operator operator;
 };
 
@@ -81,17 +80,58 @@ struct packet {
 void read_packet(struct binstr* bstr, struct packet* packet) {
 	packet->version = read_bits(bstr, 3);
 	packet->typeID = read_bits(bstr, 3);
+	// printf("version: %d\n", packet->version);
+	// printf("typeID:  %d\n", packet->typeID);
 	if (packet->typeID == LITERAL_VALUE) {
 		packet->content.literal = read_literal_value(bstr);
+		// printf("Literal value: %" PRIu64 "\n", packet->content.literal);
 	}
 	else { // operator packet
 		int lengthtypeID = read_bits(bstr, 1);
+		// printf("lengthtypeID: %d\n", lengthtypeID);
 		packet->content.operator.lengthtypeID = lengthtypeID;
-		if (lengthtypeID == 0)
+		if (lengthtypeID == 0) {
 			packet->content.operator.length = read_bits(bstr, 15);
-		else
+			// printf("length: %d bits\n", packet->content.operator.length);
+		}
+		else {
 			packet->content.operator.length = read_bits(bstr, 11);
+			// printf("length: %d packets\n", packet->content.operator.length);
+		}
 	}
+}
+
+int g_count = 0;
+
+int sum_operator_packets(struct binstr* bstr, struct packet* packet) {
+	int sum = 0;
+	struct packet p;
+	int lengthtypeID = packet->content.operator.lengthtypeID;
+	int length = packet->content.operator.length;
+	while (length > 0 && g_count < 1000) {
+		++g_count;
+		int idx_cpy = bstr->idx;
+		read_packet(bstr, &p);
+		sum += p.version;
+		if (p.typeID != LITERAL_VALUE)
+			sum += sum_operator_packets(bstr, &p);
+		if (lengthtypeID == 0)
+			length -= (bstr->idx - idx_cpy);
+		else
+			--length;
+	}
+	return sum;
+}
+
+int sum_version_numbers(struct binstr* bstr) {
+	int sum = 0;
+	struct packet packet;
+	read_packet(bstr, &packet);
+	sum += packet.version;
+	if (packet.typeID != LITERAL_VALUE) { // operator packet
+		sum += sum_operator_packets(bstr, &packet);
+	}
+	return sum;
 }
 
 int main(int argc, char* argv[]) {
@@ -99,15 +139,11 @@ int main(int argc, char* argv[]) {
 	size_t len = 0;
 	getline(&line, &len, stdin);
 	struct binstr* binstr = hex_to_binstr(line);
+	// printf("%s\n", binstr->str);
 	free(line);
 
-	printf("%s\n", binstr->str);
-	struct packet packet;
-	read_packet(binstr, &packet);
-	printf("version: %d\n", packet.version);
-	printf("typeID:  %d\n", packet.typeID);
-	if (packet.typeID == LITERAL_VALUE)
-		printf("Literal value: %d\n", packet.content.literal);
+	int sum = sum_version_numbers(binstr);
+	printf("%d\n", sum);
 
 	// clean up
 	free(binstr->str);
