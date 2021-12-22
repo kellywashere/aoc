@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
 	// show_img(img);
 
 	int ii;
-	for (ii = 0; ii < 2; ++ii) {
+	for (ii = 0; ii < 50; ++ii) {
 		struct img* img_out = process_img(img, algo);
 		destroy_img(img);
 		img = img_out;
