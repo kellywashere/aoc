@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <inttypes.h>
 
 bool empty_line(const char* line) {
 	while (*line) {
@@ -72,12 +73,14 @@ void process_line(char* line, struct cube** cubes) {
 	read_coords(&line, &cube->y[0], &cube->y[1]);
 	line += 3;
 	read_coords(&line, &cube->z[0], &cube->z[1]);
+	/*
 	if ((cube->x[1] < -50) || (cube->x[0] > 50))
 		return;
 	if ((cube->y[1] < -50) || (cube->y[0] > 50))
 		return;
 	if ((cube->z[1] < -50) || (cube->z[0] > 50))
 		return;
+	*/
 
 	struct cube* c = *cubes;
 	struct cube* prev = NULL;
@@ -150,12 +153,12 @@ void process_line(char* line, struct cube** cubes) {
 	}
 }
 
-int count_cubes(struct cube* cubes) {
-	int count = 0;
+uint64_t count_cubes(struct cube* cubes) {
+	uint64_t count = 0;
 	while (cubes) {
-		int x = cubes->x[1] - cubes->x[0] + 1;
-		int y = cubes->y[1] - cubes->y[0] + 1;
-		int z = cubes->z[1] - cubes->z[0] + 1;
+		uint64_t x = cubes->x[1] - cubes->x[0] + 1;
+		uint64_t y = cubes->y[1] - cubes->y[0] + 1;
+		uint64_t z = cubes->z[1] - cubes->z[0] + 1;
 		count += x * y * z;
 		cubes = cubes->next;
 	}
@@ -171,7 +174,7 @@ int main(int argc, char* argv[]) {
 			continue;
 		process_line(line, &cubes);
 	}
-	printf("%d\n", count_cubes(cubes));
+	printf("%" PRIu64 "\n", count_cubes(cubes));
 	// clean up
 	while (cubes) {
 		struct cube* c = cubes;
