@@ -20,11 +20,12 @@ int movecost[] = {1, 10, 100, 1000};
 struct board {
 	enum pods pos[7 + 4 + 4]; // hall: not counting positions above homes
 	int cost;
+	int hash;
 	/*
 01 2 3 4 56
 ..x.x.x.x..
-  D B C A
-  C A D B
+  7 8 9 0
+  1 2 3 4
   */
 };
 
@@ -78,36 +79,37 @@ void add_move(struct move* movelist, int* nr_moves, int from, int to, int cost) 
 	++(*nr_moves);
 }
 
+bool can_move_home(struct board* b, int from, int* pto) {
+	int homecol = b->pos[from] - A;
+	if (b->pos[homecol + 11] != EMPTY && b->pos[homecol + 11] != b->pos[from])
+		return false;
+	if (b->pos[homecol + 7] != EMPTY)
+		return false;
+	int to = (b->pos[homecol + 11] == EMPTY) ? homecol + 11 : homecol + 7;
+	bool all_free = true;
+	int ii;
+	if (from < 7) { // from hall
+		if (from <= homecol) { // move right
+			for (ii = from + 1; all_free && ii <= homecol + 1; ++ii)
+				all_free = b->pos[ii] == EMPTY;
+		}
+		else if (from >= homecol + 3) { // move left
+		}
+	}
+}
+
 void gen_move_list(struct board* b, stuct move* movelist, int* nr_moves) {
+	// usually moves are single steps, except home moves
 	*nr_moves = 0;
 	int from, to;
-	for (from = 0; from < 7; ++from) { // hall
-		if (b->pos[from] != EMPTY) {
-			int cost_per_step = movecost[b->pos[from] - A];
-			for (to = from - 1; to >= 0 && b->pos[to] == EMPTY; --to)
-				add_move(movelist, nr_moves, from, to, (from - to) * cost_per_step);
-			for (to = from + 1; to <= 6 && b->pos[to] == EMPTY; ++to)
-				add_move(movelist, nr_moves, from, to, (to - from) * cost_per_step);
-			// go home?
-			int homecol = b->pos[from] - A;
-			// check hallway
-			bool isempty = true;
-			if (from >= homecol + 3) {
-				for (to = from - 1; isempty && to >= homecol + 2; --to)
-					isempty = b->pos[to] == EMPTY;
-			}
-			else if (from <= homecol) {
-				for (to = from + 1; isempty && to <= homecol + 1; ++to)
-					isempty = b->pos[to] == EMPTY;
-			}
-			if (isempty && b->pos[7 + homecol] == EMPTY) {
-				if (b->pos[11 + homecol] == EMPTY) {
-					add_move(movelist, nr_moves, from, 11 + homecol, 
+	for (from = 0; from < 15; ++from) {
+		if (g->pos[from] != EMPTY) {
+			if (from < 7) { // hall
+				if (can_move_home(b, from, &to)) {
 				}
 			}
 		}
 	}
-
 }
 01 2 3 4 56
   7 8 9 0
