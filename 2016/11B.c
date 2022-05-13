@@ -270,6 +270,7 @@ int main(int argc, char* argv[]) {
 	int nr_elements = 0;
 	while (elements[nr_elements])
 		++nr_elements;
+	nr_elements += 2; // 11B: 2 elements found, on floor 0
 
 	show_state(state, nr_elements);
 
