@@ -1,0 +1,24 @@
+Disc #1 has 17 positions; at time=0, it is at position 1.
+Disc #2 has 7 positions; at time=0, it is at position 0.
+Disc #3 has 19 positions; at time=0, it is at position 2.
+etc.
+
+p_1(t) = (t + 1) (mod 17)
+p_2(t) = (t + 0) (mod 7)
+p_3(t) = (t + 2) (mod 19)
+etc.
+in general: p_n(t) = (t + p_n(0)) (mod m_n)
+
+for ball to drop:
+p_1(t0 + 1) = 0 (mod m_1)
+p_2(t0 + 2) = 0 (mod m_2)
+p_3(t0 + 3) = 0 (mod m_3)
+etc
+
+p_n(t0 + n) = 0 <=> (t0 + n) + p_n(0) === t0 + (p_n(0) + n) === 0 (mod m_n)
+t0 === -(p_n(0) + n) (mod m_n)
+
+this should hold for each disc
+Solve for t0 such that this is the case
+Use Chinese remainder theorem
+
