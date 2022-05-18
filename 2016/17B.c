@@ -1,0 +1,426 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <inttypes.h>
+#include <limits.h>
+
+/****************************** MD5 **************************/
+// https://github.com/Zunawe/md5-c
+typedef struct {
+	uint64_t size;        // Size of input in bytes
+	uint32_t buffer[4];   // Current accumulation of hash
+	uint8_t input[64];    // Input to be used in the next step
+	uint8_t digest[16];   // Result of algorithm
+} MD5Context;
+
+void md5Init(MD5Context *ctx);
+void md5Update(MD5Context *ctx, uint8_t *input, size_t input_len);
+void md5Finalize(MD5Context *ctx);
+void md5Step(uint32_t *buffer, uint32_t *input);
+
+uint8_t* md5String(char *input);
+uint8_t* md5File(FILE *file);
+
+uint32_t F(uint32_t X, uint32_t Y, uint32_t Z);
+uint32_t G(uint32_t X, uint32_t Y, uint32_t Z);
+uint32_t H(uint32_t X, uint32_t Y, uint32_t Z);
+uint32_t I(uint32_t X, uint32_t Y, uint32_t Z);
+
+/*
+ * Rotates a 32-bit word left by n bits
+ */
+uint32_t rotateLeft(uint32_t x, uint32_t n) {
+	return (x << n) | (x >> (32 - n));
+}
+
+#define A 0x67452301
+#define B 0xefcdab89
+#define C 0x98badcfe
+#define D 0x10325476
+
+static uint32_t S[] = {7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+                       5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20,
+                       4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+                       6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
+
+static uint32_t K[] = {0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
+                       0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+                       0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
+                       0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+                       0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
+                       0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+                       0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
+                       0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+                       0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
+                       0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+                       0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
+                       0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+                       0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
+                       0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+                       0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
+                       0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391};
+
+#define F(X, Y, Z) ((X & Y) | (~X & Z))
+#define G(X, Y, Z) ((X & Z) | (Y & ~Z))
+#define H(X, Y, Z) (X ^ Y ^ Z)
+#define I(X, Y, Z) (Y ^ (X | ~Z))
+
+/*
+ * Padding used to make the size (in bits) of the input congruent to 448 mod 512
+ */
+static uint8_t PADDING[] = {0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+/*
+ * Initialize a context
+ */
+void md5Init(MD5Context *ctx) {
+	ctx->size = (uint64_t)0;
+
+	ctx->buffer[0] = (uint32_t)A;
+	ctx->buffer[1] = (uint32_t)B;
+	ctx->buffer[2] = (uint32_t)C;
+	ctx->buffer[3] = (uint32_t)D;
+}
+
+/*
+ * Add some amount of input to the context
+ *
+ * If the input fills out a block of 512 bits, apply the algorithm (md5Step)
+ * and save the result in the buffer. Also updates the overall size.
+ */
+void md5Update(MD5Context *ctx, uint8_t *input_buffer, size_t input_len) {
+	uint32_t input[16];
+	unsigned int offset = ctx->size % 64;
+	ctx->size += (uint64_t)input_len;
+
+	// Copy each byte in input_buffer into the next space in our context input
+	for(unsigned int i = 0; i < input_len; ++i) {
+		ctx->input[offset++] = (uint8_t)*(input_buffer + i);
+
+		// If we've filled our context input, copy it into our local array input
+		// then reset the offset to 0 and fill in a new buffer.
+		// Every time we fill out a chunk, we run it through the algorithm
+		// to enable some back and forth between cpu and i/o
+		if(offset % 64 == 0) {
+			for(unsigned int j = 0; j < 16; ++j) {
+				// Convert to little-endian
+				// The local variable `input` our 512-bit chunk separated into 32-bit words
+				// we can use in calculations
+				input[j] = (uint32_t)(ctx->input[(j * 4) + 3]) << 24 |
+						   (uint32_t)(ctx->input[(j * 4) + 2]) << 16 |
+						   (uint32_t)(ctx->input[(j * 4) + 1]) <<  8 |
+						   (uint32_t)(ctx->input[(j * 4)]);
+			}
+			md5Step(ctx->buffer, input);
+			offset = 0;
+		}
+	}
+}
+
+/*
+ * Pad the current input to get to 448 bytes, append the size in bits to the very end,
+ * and save the result of the final iteration into digest.
+ */
+void md5Finalize(MD5Context *ctx) {
+	uint32_t input[16];
+	unsigned int offset = ctx->size % 64;
+	unsigned int padding_length = offset < 56 ? 56 - offset : (56 + 64) - offset;
+
+	// Fill in the padding andndo the changes to size that resulted from the update
+	md5Update(ctx, PADDING, padding_length);
+	ctx->size -= (uint64_t)padding_length;
+
+	// Do a final update (internal to this function)
+	// Last two 32-bit words are the two halves of the size (converted from bytes to bits)
+	for(unsigned int j = 0; j < 14; ++j) {
+		input[j] = (uint32_t)(ctx->input[(j * 4) + 3]) << 24 |
+		           (uint32_t)(ctx->input[(j * 4) + 2]) << 16 |
+		           (uint32_t)(ctx->input[(j * 4) + 1]) <<  8 |
+		           (uint32_t)(ctx->input[(j * 4)]);
+	}
+	input[14] = (uint32_t)(ctx->size * 8);
+	input[15] = (uint32_t)((ctx->size * 8) >> 32);
+
+	md5Step(ctx->buffer, input);
+
+	// Move the result into digest (convert from little-endian)
+	for(unsigned int i = 0; i < 4; ++i) {
+		ctx->digest[(i * 4) + 0] = (uint8_t)((ctx->buffer[i] & 0x000000FF));
+		ctx->digest[(i * 4) + 1] = (uint8_t)((ctx->buffer[i] & 0x0000FF00) >>  8);
+		ctx->digest[(i * 4) + 2] = (uint8_t)((ctx->buffer[i] & 0x00FF0000) >> 16);
+		ctx->digest[(i * 4) + 3] = (uint8_t)((ctx->buffer[i] & 0xFF000000) >> 24);
+	}
+}
+
+/*
+ * Step on 512 bits of input with the main MD5 algorithm.
+ */
+void md5Step(uint32_t *buffer, uint32_t *input) {
+	uint32_t AA = buffer[0];
+	uint32_t BB = buffer[1];
+	uint32_t CC = buffer[2];
+	uint32_t DD = buffer[3];
+
+	uint32_t E;
+
+	unsigned int j;
+
+	for(unsigned int i = 0; i < 64; ++i) {
+		switch(i / 16) {
+			case 0:
+				E = F(BB, CC, DD);
+				j = i;
+				break;
+			case 1:
+				E = G(BB, CC, DD);
+				j = ((i * 5) + 1) % 16;
+				break;
+			case 2:
+				E = H(BB, CC, DD);
+				j = ((i * 3) + 5) % 16;
+				break;
+			default:
+				E = I(BB, CC, DD);
+				j = (i * 7) % 16;
+				break;
+		}
+
+		uint32_t temp = DD;
+		DD = CC;
+		CC = BB;
+		BB = BB + rotateLeft(AA + E + K[i] + input[j], S[i]);
+		AA = temp;
+	}
+
+	buffer[0] += AA;
+	buffer[1] += BB;
+	buffer[2] += CC;
+	buffer[3] += DD;
+}
+
+/*
+ * Functions that will return a pointer to the hash of the provided input
+ */
+uint8_t* md5String(char *input) {
+	MD5Context ctx;
+	md5Init(&ctx);
+	md5Update(&ctx, (uint8_t *)input, strlen(input));
+	md5Finalize(&ctx);
+
+	uint8_t *result = malloc(16);
+	memcpy(result, ctx.digest, 16);
+	return result;
+}
+/********************* END MD5 *********************************/
+
+/* LL based stack for backtacking algo */
+
+#define MAX_PREFIXLEN 10
+
+enum dirs {
+	UP = 0,
+	DOWN,
+	LEFT,
+	RIGHT,
+	NR_DIRS
+};
+
+char dirchars[] = "UDLR";
+int dir2dx[] = {0, 0, -1, 1};
+int dir2dy[] = {-1, 1, 0, 0};
+
+void print_dirs(bool* dirs) {
+	for (enum dirs d = UP; d < NR_DIRS; ++d)
+		if (dirs[d])
+			printf("%c", dirchars[d]);
+	printf("\n");
+}
+
+// node information for route finding
+// path so far is stored separately
+struct location {
+	int              x;
+	int              y;
+	bool             dirs[NR_DIRS]; // directions still to explore
+	struct location* next;
+};
+
+struct location* create_location() {
+	struct location* location = malloc(sizeof(struct location));
+	location->x = 0;
+	location->y = 0;
+	for (enum dirs d = UP; d < NR_DIRS; ++d)
+		location->dirs[d] = false;
+	location->next = NULL;
+	return location;
+}
+
+void destroy_location(struct location* location) {
+	free(location);
+}
+
+void location_print(struct location* s) {
+	printf("(%d, %d), to explore: ", s->x, s->y);
+	print_dirs(s->dirs);
+}
+
+
+// Backtrack stack
+struct backtrack_stack {
+	struct location* curloc; // head of LL that acts as stack of locations
+	char*            path;   // path description in chars (for md5) (not NUL term!!!)
+	int              path_capacity; // capacity of path char buffer
+	int              path_len; // actual length of path
+};
+
+struct backtrack_stack* create_backtrack_stack() {
+	struct backtrack_stack* bts = malloc(sizeof(struct backtrack_stack));
+	bts->curloc = NULL;
+	bts->path_capacity = 512;
+	bts->path  = malloc(bts->path_capacity * sizeof(char));
+	bts->path_len = 0;
+	return bts;
+}
+
+void destroy_backtrack_stack(struct backtrack_stack* bts) {
+	if (bts) {
+		while (bts->curloc) {
+			struct location* e = bts->curloc;
+			bts->curloc = e->next;
+			free(e);
+		}
+		free(bts->path);
+		free(bts);
+	}
+}
+
+void backtrack_stack_print(struct backtrack_stack* bts) {
+	struct location* el = bts->curloc;
+	while (el) {
+		location_print(el);
+		el = el->next;
+	}
+	printf("Path: %.*s\n", bts->path_len, bts->path);
+}
+
+bool backtrack_stack_empty(struct backtrack_stack* stack) {
+	return stack->curloc == NULL;
+}
+
+struct location* backtrack_stack_backtrace(struct backtrack_stack* bts, enum dirs* dir) {
+	// returns popped location. Sets *dir to directory taken from parent to popped location
+	if (bts->curloc == NULL) {
+		fprintf(stderr, "Error: nowhere to backtrack to!\n");
+		*dir = -1; // invalid
+		return NULL;
+	}
+	struct location* curloc = bts->curloc;
+	bts->curloc = curloc->next;
+	if (bts->path_len > 0) {
+		char dirch = bts->path[--bts->path_len];
+		for (enum dirs d = UP; d < NR_DIRS; ++d) {
+			if (dirchars[d] == dirch) {
+				*dir = d;
+				break;
+			}
+		}
+	}
+	return curloc;
+}
+
+void backtrack_stack_travel_forward(struct backtrack_stack* bts, enum dirs dir) {
+	struct location* curlocation = bts->curloc;
+	struct location* newlocation = create_location(); // default: (0,0), all doors closed
+	if (curlocation) { // curlocation is NULL on first-time call !
+		newlocation->x = curlocation->x + dir2dx[dir];
+		newlocation->y = curlocation->y + dir2dy[dir];
+		// check path capacity
+		if (bts->path_len >= bts->path_capacity) {
+			bts->path_capacity *= 2;
+			bts->path = realloc(bts->path, bts->path_capacity * sizeof(char));
+		}
+		// remember path
+		bts->path[bts->path_len++] = dirchars[dir];
+	}
+	// push to front of LL
+	newlocation->next = bts->curloc;
+	bts->curloc = newlocation;
+}
+
+const char* prefix  = "edjrjqaa";
+
+#define OPEN_THRESHOLD 0x0b
+
+void doors_open(MD5Context* ctx, char* prefix, struct backtrack_stack* bts) {
+	// modifies open doors in dirs[]
+	md5Init(ctx);
+	md5Update(ctx, (uint8_t *)prefix, strlen(prefix));
+	md5Update(ctx, (uint8_t *)bts->path, bts->path_len);
+	md5Finalize(ctx);
+	struct location* loc = bts->curloc;
+	loc->dirs[UP]    = loc->y != 0 && (ctx->digest[0] >> 4)   >= OPEN_THRESHOLD;
+	loc->dirs[DOWN]  = loc->y != 3 && (ctx->digest[0] & 0x0f) >= OPEN_THRESHOLD;
+	loc->dirs[LEFT]  = loc->x != 0 && (ctx->digest[1] >> 4)   >= OPEN_THRESHOLD;
+	loc->dirs[RIGHT] = loc->x != 3 && (ctx->digest[1] & 0x0f) >= OPEN_THRESHOLD;
+}
+
+
+int find_longest_path(char* prfx) {
+	MD5Context ctx;
+	enum dirs dir;
+	struct backtrack_stack* bts = create_backtrack_stack();
+
+	backtrack_stack_travel_forward(bts, -1); // move to 0,0; dir is ignored 1st time
+	doors_open(&ctx, prfx, bts);
+
+	int maxlen = 0;
+	while (bts->curloc) {
+		bool have_dirs = false;
+		struct location* curloc = bts->curloc;
+		if (curloc->x == 3 && curloc->y == 3) { // found end node
+			if (bts->path_len > maxlen)
+				maxlen = bts->path_len;
+		}
+		else {
+			// check for unexplored directions
+			for (dir = UP; dir < NR_DIRS && !curloc->dirs[dir]; ++dir)
+				;
+			have_dirs = dir != NR_DIRS;
+		}
+		// two cases:
+		// 1. have_dirs == true --> go fwd in first possible dir
+		// 2. have_dirs == false --> backtrack. Close fwd direction we came from
+		if (have_dirs) {
+			backtrack_stack_travel_forward(bts, dir);
+			doors_open(&ctx, prfx, bts);
+		}
+		else {
+			curloc = backtrack_stack_backtrace(bts, &dir);
+			free(curloc);
+			if (bts->curloc)
+				bts->curloc->dirs[dir] = false; // close this direction
+		}
+	}
+	destroy_backtrack_stack(bts);
+	return maxlen;
+}
+
+int main(int argc, char* argv[]) {
+	char prfx[20];
+	if (argc > 1)
+		strncpy(prfx, argv[1], 19);
+	else
+		strncpy(prfx, prefix, 19);
+
+	int maxlen = find_longest_path(prfx);
+	printf("%d\n",maxlen);
+	return 0;
+}

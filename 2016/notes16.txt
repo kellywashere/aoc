@@ -1,0 +1,152 @@
+Dragon insights:
+
+example with 3 bit input:
+             ___
+a = ABC, b = CBA
+
+ABC
+    ___
+ABC0CBA
+
+    ___     ___
+ABC0CBA0ABC1CBA
+
+So we get:
+a f(1) b f(2) a f(3) b (f4) ... etc
+where f(n) are filler bits that can be generated
+using a='' (0 length input)
+
+f: 0 --> 0 0 1 --> 0 0 1 0 0 1 1 --> 0 0 1 0 0 1 1 0 0 0 1 1 0 1 1 etc
+
+
+Checksum insights
+
+When executed N times, each group of 2^N bits collapses into 1 bit.
+Statement:
+This bit equals 1 when nr of 1s in 2^N bits is even, and 0 if odd
+(so we are looking at odd parity here).
+
+Proof by induction:
+
+1. base case:
+00, 11: even nr of 1s, produce a 1
+01, 10, odd nr of 1s, produce a 0
+
+2. 2^N can be split in two groups of 2^(N-1).
+Assuming induction statement:
+Left  group produces 1 of nr of 1s is even, 0 otherwise
+Right group produces 1 of nr of 1s is even, 0 otherwise
+Combining Left and Right produces 1 if both left and right have
+odd nr of 1s, or both have even nr of 1s. In both cases total
+nr of 1s is even. A 0 is produced for odd,even and for even,odd
+In the latter case, total is odd.
+So induction statement holds also for 2^N bits  QED
+
+A consequence of this is that the order of bits in the 2^N block
+do not matter.
+
+
+Parity of ab:
+
+b = ~(reversed a) = rev(~b) as in problem
+Number of 1s in ab = number of 1s in a + number of ones in b =
+= number of 1s in a + number of 1s in ~a =
+= number of 1s in a + number of 0s in a = length of a
+
+length a even ==> does not impact parity of rest of bits in group under consideration
+length a odd  ==> flips parity of rest of bits in group under consideration
+
+P(ab) = 1 + length(a)  (mod 2)
+dragon step:
+P(a0b) = P(ab) = 1 + length(a)  (mod 2)
+one more dragon step:
+P(a0b 0 a1b) = 1 + length(a0b) (mod 2) = 0 !!
+
+So after every dragon step (except maybe first) the parity of the whole string is 0
+
+Another way to prove that:
+P(a0b 0 a1b) = P(aabb 001) = P(001) = 0 (odd parity bit)
+
+Parity of any string
+
+P(s1..sn) = 1 + sum(s1..sn)  (mod 2)
+
+Let's define S(s1..sn) as sum of bits s1..sn
+
+
+Substring parity:
+
+Say, we have an infinite string s1 s2 ... sn ... and need to calculate the
+parity bit of a substring [sm ... sn]. P([sm..sn]) = 1 + sum(sm ... sn)  (mod 2)
+sum[s1..sn] = sum([s1..s(m-1)]) + sum([sm..sn]) <=> sum([sm..sn]) = sum([s1..sn]) - sum([s0..s(m-1)])
+P([sm..sn]) = 1 - ( sum[s1..sn]) - sum([s1..s(m-1)]) ) = P([s1..sn]) + sum([s1..s(m-1)] = 
+= P([s1..sn]) + (1 - P([s1..s[m-1]))  (mod 2)
+
+So: P([sm..sn]) = 1 + P([s1..sn]) - P([s1..s[m-1])  (mod 2)
+
+Another way to write:
+P([s1..sn]) = 1 + P([s1..s[m-1]) + P([sm..sn])  (mod 2)
+
+General:
+If we chop s1..sn into k substrings, P([s1..sn]) = 1 + k + sum(parities of substrings)  (mod 2)
+
+
+Calculate parity of first M bits of generated string:
+
+We have reapeating sections [a f(1) b f(2)] [a f(3) b f(4)] ... etc
+These have a length of 2*La + 2, with La the length of a
+So we have k = floor(M / (2*La + 2)) of these sections.
+
+The parity of such a section P([a f(n) b f(n+1)]) = P([ab f(n)f(n+1)]) =
+= 1 + P(ab) + P(f(n)f(n+1)) = 1 + (1 + La) + P(f(n)f(n+1)) = La + P(f(n)f(n+1))  (mod 2)
+So:
+P([a f(n) b f(n+1)]) = 1 + La + f(n) + f(n+1)  (mod 2)
+
+To calculate parity of first k of these sections:
+P([a f(1) b f(2)][a f(3) b f(4)] ... [a f(2*k - 1) b f(2*k)]) =
+= 1 + k + sum of parities of sections = 1 + k + k*(1 + La) + sum(f(1)...f(2*k)) =
+= 1 + k + k + k*La + sum(f(1)..f(2*k)) = 1 + k*La + sum(f(1)..f(2*k))  (mod 2)
+
+After these k sections, we have r = M - k*(2*La + 2) bits left to consider in the total parity.
+Let's call the parity of that section Pr = 1 + Sr (with Sr the sum of those bits)
+
+case 0: r == 0                  ==>  Pr = 1
+case 1: r <= La                 ==>  Pr = 1 + sum(a(1) .. a(r))
+case 2: r == La + 1             ==>  Pr = 1 + sum(a) + f(2*k + 1)
+case 3: La + 1 < r <= 2*La + 1  ==>  Pr = 1 + sum(a) + f(2*k + 1) + sum(b(1)..b(r - La - 1))
+case 4: r == 2*La + 1           ==>  Pr = 1 + La + f(2*k + 1)
+
+For case 3 we derive (n = r - La - 1):
+sum(b(1)..b(n)) = (1 - a(La)) + (1 - a(La - 1)) + ... + (1 - a(La - n + 1)) =
+= n - sum(a(La - n + 1) .. a(La) = n - (sum(a) - sum(a(1)..a(La - n))
+
+
+Sum of filler bits:
+
+Filler bits are also generated via the dragon steps
+
+Call Ls the length of filler bits after s dragon steps
+L0 = 1   (0)
+L1 = 3   (001)
+Ls = 2*L(s-1) + 1
+
+To find sum of first X filler bits:
+find max value for s s.t. L(s) < X (after *next* step length X would be reached)
+sum of F(s) = S(F(s)) is 1 if s > 0, and 0 for s = 0, sue to parity after each step being 0, see above.
+One step later, we have F(s) 0 rev(~F(s)) with a length at least X.
+S(F(s+1),X) = S(F(s)) + 0 + S(rev(~F(s), X - L(s) - 1)  (last term: sum of first X - L(s) - 1 bits of rev(~F(s))
+
+S(rev(~F(s), m) is sum of first m bits of rev(~F(s)), which equals the sum of the *last* m bits of ~F(s).
+That sum equals S(~F(s)) - S(~F(s), L(s) - m)  (total sum of ~F(s) minus sum of first L(s)-m bits in ~F(s))
+
+S(~F(s)) = L(s) - S(F(s))
+For s = 0 this is: S(~F(s)) = S(~0) = S(1) = 1
+For s > 0 this is: L(s) - S(F(s)) = 1 - S(F(s)) = 1 - 1 = 0 (mod 2)
+
+And S(~F(s), L(s) - m) = L(s) - m - S(F(s), L(s) - m)
+
+So S(ref(~F(s)), m) = S(~F(s)) - S(~F(s), L(s) - m) = S(~F(s)) + S(~F(s),  L(s) - m)  (mod 2)   mod 2, + is same as -
+s = 0:  = m (m = 0, or m = 1)
+s > 0:  = 0 + S(~F(s), L(s) - m) = L(s) - m - S(F(s), L(s) - m) = 1 + m + s(F(s), L(s) - m)  (mod 2)
+
+And we have found our recursion...
