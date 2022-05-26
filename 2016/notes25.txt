@@ -1,0 +1,80 @@
+Program does this:
+
+d = a + 2534
+while (true) {
+	a = d;
+	while (a > 0) {
+		a = d / 2
+		b = d % 2
+		out b
+	}
+}
+
+So basically it prints the binary representation of a + 2534 over and over
+if we use a = 0b101010101010 - 2534 = 196, we have what we need
+
+
+---------------
+
+cpy a d     d = a
+cpy 7 c     c = 7
+
+# d = a + 7 * 362 = a + 2534
+	L0:
+	cpy 362 b
+
+	# d += b; b = 0;
+		inc d
+		dec b
+		jnz b -2
+
+		dec c
+		jnz c -5
+
+L12:
+cpy d a   ; a = d
+
+L11:
+jnz 0 0   ; nop
+cpy a b   ; b = a (=d)
+
+# a = b/2; b = b % 2
+	# a = b/2; c = (b % 2 == 0) ? 2 : 1; goto L4
+		cpy 0 a   ; a = 0
+
+		L1:
+		cpy 2 c   ; c = 2
+
+		L2:
+		# if b == 0 goto L4
+			jnz b L3
+			jnz 1 L4   ; jmp L4
+			L3:
+		dec b
+		dec c
+		jnz c L2
+
+		inc a
+		jnz 1 L1    ; jmp L1
+
+
+	# b = 2 - c
+		L4:
+		cpy 2 b   ; b = 2
+
+		L5:
+		#if c == 0 goto L7
+			jnz c L6
+			jnz 1 L7  ; jmp L7
+		L6:
+		dec b
+		dec c
+		jnz 1 L5 ; jmp L5
+
+L7:
+jnz 0 0   ; nop
+
+out b
+# if (a == 0) goto L12 else goto L11
+	jnz a L11
+	jnz 1 L12 ; jmp L12
