@@ -1,0 +1,77 @@
+Interestingly, my simulator is fast enough to produce answer within 25 seconds or so
+TGL instr @ 36
+TGL instr @ 34
+TGL instr @ 32
+TGL instr @ 30
+TGL instr @ 28
+TGL instr @ 26
+TGL instr @ 24
+TGL instr @ 22
+TGL instr @ 20
+TGL instr @ 18
+479008535
+
+There is only ne tgl instruction in input program, at line 17
+
+I added dbg output to show which instructions get altered. This is required when I
+start modding the original program (after adding mul instruction): I need to make
+sure the modded instructions are not part of the toggling, or the functionality
+would be impacted.
+If I do not touch lines below tgl instruction (starting at line 18) functionality should
+not be impacted.
+
+I add following instructions:
+add x r
+	adds x to register r (order consistent with cpy instr)
+mul x r
+	multiplies content of register r by x (order consistent with cpy instr)
+nop
+	does nothing (to fill up space)
+
+Then I mod the original program to use the new instructions.
+
+input --> a
+# next section does: b = a-1; d = a
+	cpy a b
+	dec b
+	cpy a d
+
+# next section does: a = b * d; c = 0; d = 0;
+cpy 0 a
+	L1:
+	cpy b c
+
+	# next 3 instr: a += c; c = 0
+		L2:
+		inc a
+		dec c
+		jnz c L2
+
+	dec d
+	jnz d L1
+
+
+# next 3 instr: --b; c = b; d = b;
+	dec b
+	cpy b c
+	cpy c d
+
+# next 3 instr: c += d; d = 0;
+	L3:
+	dec d
+	inc c
+	jnz d L3
+
+tgl c
+cpy -16 c
+
+jnz 1 c
+cpy 95 c
+jnz 73 d
+
+inc a
+inc d
+jnz d -2
+
+inc c
+jnz c -5
