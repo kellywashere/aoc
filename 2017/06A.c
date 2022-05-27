@@ -16,8 +16,8 @@ int redistribute(int* b, int nrbanks) {
 	return maxidx; // returns index of biggest, for analysis purposes
 }
 
-
-#define NRHASHBITS 28
+// double hashing allows small memory map
+#define NRHASHBITS 16
 #define HASHMASK ((1<<NRHASHBITS)-1)
 
 uint32_t rothash(uint32_t v, int amount) {
@@ -50,12 +50,15 @@ int main(int argc, char* argv[]) {
 	while (scanf("%d", &x) == 1)
 		b[nrbanks++] = x;
 
-	// generate hash vals
-	uint32_t hashvals[32];
-	for (int ii = 0; ii < nrbanks; ++ii)
-		hashvals[ii] = rand() & HASHMASK;
-
-	int* seen = calloc(1 << NRHASHBITS, sizeof(int));
+	// generate hash vals (double hashing)
+	uint32_t hashvals1[32];
+	uint32_t hashvals2[32];
+	for (int ii = 0; ii < nrbanks; ++ii) {
+		hashvals1[ii] = rand() & HASHMASK;
+		hashvals2[ii] = rand() & HASHMASK;
+	}
+	int* seen1 = calloc(1 << NRHASHBITS, sizeof(int));
+	int* seen2 = calloc(1 << NRHASHBITS, sizeof(int));
 
 	int r = 0;
 	for ( ; true; ++r) {
@@ -65,15 +68,18 @@ int main(int argc, char* argv[]) {
 			printf("%4d", b[ii]);
 		printf("\n");
 		*/
-		int hashidx = gen_hash(b, nrbanks, hashvals);
-		if (seen[hashidx]) {
-			// printf("step %d == step %d\n", r, seen[hashidx] - 1);
+		int hashidx1 = gen_hash(b, nrbanks, hashvals1);
+		int hashidx2 = gen_hash(b, nrbanks, hashvals2);
+		if (seen1[hashidx1] && seen1[hashidx1] == seen2[hashidx2])
 			break;
-		}
-		seen[hashidx] = r + 1; // +1 since we start with r = 0
+		seen1[hashidx1] = r + 1; // +1 since we start with r = 0
+		seen2[hashidx2] = r + 1; // +1 since we start with r = 0
 
 		redistribute(b, nrbanks);
 	}
 	printf("%d\n", r);
+
+	free(seen1);
+	free(seen2);
 	return 0;
 }
