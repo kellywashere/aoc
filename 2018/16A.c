@@ -83,13 +83,13 @@ void do_mnem(enum mnemonic mnem, int* operands, int* regs) {
 			regs[operands[2]] = regs[operands[0]] > regs[operands[1]] ? 1 : 0;
 			break;
 		case EQIR:
-			regs[operands[2]] = operands[0] = regs[operands[1]] ? 1 : 0;
+			regs[operands[2]] = operands[0] == regs[operands[1]] ? 1 : 0;
 			break;
 		case EQRI:
-			regs[operands[2]] = regs[operands[0]] = operands[1] ? 1 : 0;
+			regs[operands[2]] = regs[operands[0]] == operands[1] ? 1 : 0;
 			break;
 		case EQRR:
-			regs[operands[2]] = regs[operands[0]] = regs[operands[1]] ? 1 : 0;
+			regs[operands[2]] = regs[operands[0]] == regs[operands[1]] ? 1 : 0;
 			break;
 	}
 }
