@@ -253,17 +253,20 @@ int find_target(struct grid* map) {
 
 	struct minheap* open_set = create_minheap();
 	int* gscore = malloc(w * h * 3 * sizeof(int));
-	int* fscore = malloc(w * h * 3 * sizeof(int));
+	//int* fscore = malloc(w * h * 3 * sizeof(int)); // No need since it is key of open_set
+	int fscore;
 	for (int ii = 0; ii < w * h * 3; ++ii) {
 		gscore[ii] = INT_MAX;
-		fscore[ii] = INT_MAX;
+		//fscore[ii] = INT_MAX;
 	}
 
 	int idx = 3*(0 * w + 0) + TORCH; // current state (0,0, TORCH)
 	gscore[idx] = 0;
-	fscore[idx] = hscore(map, 0, 0, TORCH);
+	//fscore[idx] = hscore(map, 0, 0, TORCH);
+	fscore = hscore(map, 0, 0, TORCH);
 
-	minheap_insert(open_set, fscore[idx], idx);
+	//minheap_insert(open_set, fscore[idx], idx);
+	minheap_insert(open_set, fscore, idx);
 
 	int cost = INT_MAX;
 	while (cost == INT_MAX && open_set->size) {
@@ -291,11 +294,11 @@ int find_target(struct grid* map) {
 						int tentative_gscore = gscore[idx] + dir2cost[dir];
 						if (tentative_gscore < gscore[nidx]) {
 							gscore[nidx] = tentative_gscore;
-							fscore[nidx] = tentative_gscore + hscore(map, nx, ny, ntool);
+							fscore = tentative_gscore + hscore(map, nx, ny, ntool);
 							if (!minheap_contains_val(open_set, nidx))
-								minheap_insert(open_set, fscore[nidx], nidx);
+								minheap_insert(open_set, fscore, nidx);
 							else
-								minheap_update_key_of_val(open_set, fscore[nidx], nidx); // Nasty...
+								minheap_update_key_of_val(open_set, fscore, nidx); // Nasty...
 						}
 					}
 				}
