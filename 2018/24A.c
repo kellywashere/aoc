@@ -4,19 +4,30 @@
 #include <ctype.h>
 #include <string.h>
 
+// #define DEBUG
+
 #define MAX_NAMES 128
 #define MAX_GROUPS 64
 
+#define MIN(a,b) ((a)<(b)?(a):(b))
+#define MAX(a,b) ((a)>(b)?(a):(b))
+
 struct group {
+	int army_id; // which army this group belongs to
+#ifdef DEBUG
+	int group_id; // group in army
+#endif
+
 	int units;
 	int hp;
 	int weakto;   // bitfield
 	int immuneto; // bitfield
-	int damage_type;
-	int damage;
+	int attack_type;
+	int attack;
 	int initiative;
 
-	int target;
+	struct group* target;
+	struct group* attacked_by;
 };
 
 bool empty_line(const char* line) {
@@ -95,61 +106,133 @@ int wordlist_to_bitfield(char **pLine, char* names[]) {
 	return bf;
 }
 
-int main(int argc, char* argv[]) {
-	char* names[MAX_NAMES + 1]; // NULL terminated char* array
-	for (int ii = 0; ii < MAX_NAMES + 1; ++ii)
-		names[ii] = NULL; // put all terminations in place
+int cmp_by_effective_power(const void* a, const void* b) {
+	struct group* ga = *(struct group**)a;
+	struct group* gb = *(struct group**)b;
+	int epa = ga->units * ga->attack;
+	int epb = gb->units * gb->attack;
+	return (epa == epb) ? gb->initiative - ga->initiative : epb - epa;
+}
 
-	struct group army[2][MAX_GROUPS];
-	int nr_groups[2] = {0, 0}; // groups in each army
-	int army_idx = 0;
+int cmp_by_initiative(const void* a, const void* b) {
+	struct group* ga = *(struct group**)a;
+	struct group* gb = *(struct group**)b;
+	return ((gb->units == 0) ? 0 : gb->initiative) - ((ga->units == 0) ? 0 : ga->initiative);
+}
 
-	char *line = NULL;
-	size_t len = 0;
-	while (getline(&line, &len, stdin) != -1) {
-		if (empty_line(line))
-			continue;
-		if (!strncmp(line, "Immune", 6))
-			army_idx = 0;
-		else if (!strncmp(line, "Infection", 9))
-			army_idx = 1;
-		else {
-			int idx = nr_groups[army_idx];
-			char* l = line;
-			// read all numbers
-			read_int(&l, &army[army_idx][idx].units);
-			read_int(&l, &army[army_idx][idx].hp);
-			read_int(&l, &army[army_idx][idx].damage);
-			read_int(&l, &army[army_idx][idx].initiative);
-			// weakness
-			army[army_idx][idx].weakto = 0;
-			if ( (l = strstr(line, "weak to ")) ) {
-				l += 8;
-				army[army_idx][idx].weakto = wordlist_to_bitfield(&l, names);
+int calc_damage(struct group* attacker, struct group* defender) { // not taking into account defender #units
+	int attack_type_bf = (1 << attacker->attack_type);
+	bool immuneto = (defender->immuneto & attack_type_bf) != 0;
+	bool weakto = (defender->weakto & attack_type_bf) != 0;
+	int effpow = attacker->units * attacker->attack;
+	if (weakto)
+		effpow *= 2;
+	if (immuneto)
+		effpow *= 0;
+	return effpow;
+}
+
+struct group* choose_target(struct group* groups, int groups_sz, struct group* attacker) {
+	int max_damage = 0;
+	struct group* target = NULL;
+	for (int ii = 0; ii < groups_sz; ++ii) {
+		struct group* t = &groups[ii];
+		if (attacker->army_id != t->army_id && t->attacked_by == NULL && t->units > 0) {
+			int d = calc_damage(attacker, t);
+#ifdef DEBUG
+			if (d > 0)
+				printf("Army/grp: %d/%d would deal Army/grp %d/%d %d damage\n",
+						attacker->army_id + 1, attacker->group_id + 1, t->army_id + 1, t->group_id + 1, d);
+#endif
+			bool select = false;
+			if (d > 0 && d >= max_damage) {
+				if (d == max_damage) { // we need to break tie
+					int ep_target = target->units * target->attack;
+					int ep_t = t->units * t->attack;
+					select = (ep_t > ep_target) || (ep_t == ep_target && t->initiative > target->initiative);
+				}
+				else
+					select = true;
 			}
-			// immunity
-			army[army_idx][idx].immuneto = 0;
-			if ( (l = strstr(line, "immune to ")) ) {
-				l += 10;
-				army[army_idx][idx].immuneto = wordlist_to_bitfield(&l, names);
+			if (select) {
+				max_damage = d;
+				target = t;
 			}
-			// damage type
-			char word[64];
-			l = strstr(line, "damage ") - 1;
-			while (*(l-1) != ' ')
-				--l;
-			read_word(&l, word);
-			army[army_idx][idx].damage_type = name_to_idx(word, names);
-			++nr_groups[army_idx];
 		}
 	}
-	free(line);
+	return target;
+}
 
-	for (int army_idx = 0; army_idx < 2; ++army_idx) {
-		// 2374 units each with 41150 hit points (immune to bludgeoning, slashing, radiation; weak to cold) with an attack that does 34 bludgeoning damage at initiative 6
-		for (int ii = 0; ii < nr_groups[army_idx]; ++ii) {
-			printf("%d units; %d hp; immune: ", army[army_idx][ii].units, army[army_idx][ii].hp);
-			int bf = army[army_idx][ii].immuneto;
+void run_target_selection(struct group* groups, int groups_sz) {
+	// reset
+	for (int ii = 0; ii < groups_sz; ++ii) {
+		groups[ii].target = NULL;
+		groups[ii].attacked_by = NULL;
+	}
+
+	// sort by effective power (descending)
+	struct group* sorted_by_pow[MAX_GROUPS];
+	for (int ii = 0; ii < groups_sz; ++ii)
+		sorted_by_pow[ii] = &groups[ii];
+	qsort(sorted_by_pow, groups_sz, sizeof(struct group*), cmp_by_effective_power);
+
+	for (int ii = 0; ii < groups_sz; ++ii) {
+		if (sorted_by_pow[ii]->units > 0) {
+			struct group* target = choose_target(groups, groups_sz, sorted_by_pow[ii]);
+			if (target) {
+				sorted_by_pow[ii]->target = target;
+				target->attacked_by = sorted_by_pow[ii];
+#ifdef DEBUG
+	printf("Attacker army/grp %d/%d chose target %d/%d\n",
+			sorted_by_pow[ii]->army_id + 1, sorted_by_pow[ii]->group_id + 1, target->army_id + 1, target->group_id + 1);
+#endif
+			}
+		}
+	}
+}
+
+void run_attack(struct group* groups, int groups_sz) {
+	// sort by initiative (descending)
+	struct group* sorted_by_initiative[MAX_GROUPS];
+	for (int ii = 0; ii < groups_sz; ++ii)
+		sorted_by_initiative[ii] = &groups[ii];
+	qsort(sorted_by_initiative, groups_sz, sizeof(struct group*), cmp_by_initiative);
+
+	for (int ii = 0; ii < groups_sz; ++ii) {
+		if (sorted_by_initiative[ii]->units > 0) {
+			struct group* target = sorted_by_initiative[ii]->target;
+			if (target) {
+				int d = calc_damage(sorted_by_initiative[ii], target);
+				int units_killed = d / target->hp;
+				units_killed = MIN(units_killed, target->units);
+#ifdef DEBUG
+				printf("Army/grp %d/%d attacks Army/grp %d/%d and kills %d units\n",
+						sorted_by_initiative[ii]->army_id + 1, sorted_by_initiative[ii]->group_id + 1,
+						target->army_id + 1, target->group_id + 1,
+						units_killed);
+#endif
+				target->units -= units_killed;
+			}
+		}
+	}
+}
+
+bool army_has_units(struct group* groups, int groups_sz, int army_id) {
+	for (int ii = 0; ii < groups_sz; ++ii)
+		if (groups[ii].army_id == army_id && groups[ii].units > 0)
+			return true;
+	return false;
+}
+
+
+void show_army(struct group* groups, int groups_sz, int army_id, char* names[]) {
+	for (int ii = 0; ii < groups_sz; ++ii) {
+		if (groups[ii].army_id == army_id && groups[ii].units > 0) {
+#ifdef DEBUG
+			printf("Army/group: %d/%d; ", groups[ii].army_id + 1, groups[ii].group_id + 1);
+#endif
+			printf("%d units; %d hp; immune: ", groups[ii].units, groups[ii].hp);
+			int bf = groups[ii].immuneto;
 			int idx = 0;
 			while (bf) {
 				if ((bf & 1) == 1) {
@@ -161,7 +244,7 @@ int main(int argc, char* argv[]) {
 				bf >>= 1;
 			}
 			printf("; weak to: ");
-			bf = army[army_idx][ii].weakto;
+			bf = groups[ii].weakto;
 			idx = 0;
 			while (bf) {
 				if ((bf & 1) == 1) {
@@ -172,10 +255,91 @@ int main(int argc, char* argv[]) {
 				++idx;
 				bf >>= 1;
 			}
-			printf("; %d %s damage; initiative: %d\n", army[army_idx][ii].damage, names[army[army_idx][ii].damage_type], army[army_idx][ii].initiative);
+			printf("; %d %s attack; initiative: %d", groups[ii].attack, names[groups[ii].attack_type], groups[ii].initiative);
+			printf(" (eff. pow: %d)\n", groups[ii].units * groups[ii].attack);
 		}
-		printf("\n");
 	}
+	printf("\n");
+}
+
+int main(int argc, char* argv[]) {
+	char* names[MAX_NAMES + 1]; // NULL terminated char* array
+	for (int ii = 0; ii < MAX_NAMES + 1; ++ii)
+		names[ii] = NULL; // put all terminations in place
+
+	struct group groups[MAX_GROUPS];
+	int groups_sz = 0;
+
+	int army_id = 0;
+#ifdef DEBUG
+	int group_id[2] = {0, 0};
+#endif
+
+	char *line = NULL;
+	size_t len = 0;
+	while (getline(&line, &len, stdin) != -1) {
+		if (empty_line(line))
+			continue;
+		if (!strncmp(line, "Immune", 6))
+			army_id = 0;
+		else if (!strncmp(line, "Infection", 9))
+			army_id = 1;
+		else {
+			char* l = line;
+			groups[groups_sz].army_id = army_id;
+#ifdef DEBUG
+			groups[groups_sz].group_id = group_id[army_id]++;
+#endif
+			// read all numbers
+			read_int(&l, &groups[groups_sz].units);
+			read_int(&l, &groups[groups_sz].hp);
+			read_int(&l, &groups[groups_sz].attack);
+			read_int(&l, &groups[groups_sz].initiative);
+			// weakness
+			groups[groups_sz].weakto = 0;
+			if ( (l = strstr(line, "weak to ")) ) {
+				l += 8;
+				groups[groups_sz].weakto = wordlist_to_bitfield(&l, names);
+			}
+			// immunity
+			groups[groups_sz].immuneto = 0;
+			if ( (l = strstr(line, "immune to ")) ) {
+				l += 10;
+				groups[groups_sz].immuneto = wordlist_to_bitfield(&l, names);
+			}
+			// attack type
+			char word[64];
+			l = strstr(line, "damage ") - 1;
+			while (*(l-1) != ' ')
+				--l;
+			read_word(&l, word);
+			groups[groups_sz].attack_type = name_to_idx(word, names);
+			++groups_sz;
+		}
+	}
+	free(line);
+
+	// FIGHT!!!
+#ifdef DEBUG
+	int round = 0;
+#endif
+
+	while (army_has_units(groups, groups_sz, 0) && army_has_units(groups,groups_sz, 1)) {
+#ifdef DEBUG
+		printf("Round %d\n", ++round);
+		printf("Armies:\n");
+		for (int army_idx = 0; army_idx < 2; ++army_idx)
+			show_army(groups, groups_sz, army_idx, names);
+#endif
+		run_target_selection(groups, groups_sz);
+		run_attack(groups, groups_sz);
+	}
+
+	// Count units
+	int units = 0;
+	for (int ii = 0; ii < groups_sz; ++ii)
+		units += groups[ii].units;
+	printf("%d\n", units);
 
 	// clean up
 	for (int ii = 0; names[ii] != NULL; ++ii)
