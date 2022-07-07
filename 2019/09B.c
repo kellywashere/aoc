@@ -5,7 +5,7 @@
 #include <ctype.h>
 #include <inttypes.h>
 
-typedef uint64_t word;
+typedef int64_t word;
 
 #define INITIAL_MEMSZ 512
 

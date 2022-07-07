@@ -5,7 +5,7 @@
 #include <ctype.h>
 #include <inttypes.h>
 
-typedef uint64_t word;
+typedef int64_t word;
 
 #define INITIAL_MEMSZ 512
 
@@ -224,6 +224,7 @@ void run_program(struct computer* comp, int inp, word* out1, word* out2) {
 		}
 
 		int addr;
+		word out;
 		switch (opcode) {
 			case ADD:
 				addr = computer_get_mem(comp, comp->pc + 3) + (mode[2] == 2 ? comp->base : 0);
@@ -244,7 +245,7 @@ void run_program(struct computer* comp, int inp, word* out1, word* out2) {
 				input_given = true;
 				break;
 			case OUT:
-				word out = computer_get_parm(comp, 1, mode[0]);
+				out = computer_get_parm(comp, 1, mode[0]);
 				comp->pc += 2;
 				if (outputs_given == 0)
 					*out1 = out;
