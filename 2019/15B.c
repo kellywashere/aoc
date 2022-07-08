@@ -24,7 +24,7 @@ struct minheap {
 	unsigned int       capacity; // capacity in nr of elements
 };
 
-struct minheap* create_minheap() {
+struct minheap* create_minheap(void) {
 	struct minheap* heap = malloc(sizeof(struct minheap));
 	heap->capacity = 127; // 7 layers start size
 	heap->mem = malloc(sizeof(struct minheap_el) * heap->capacity);
@@ -137,6 +137,60 @@ bool minheap_update_key_of_val(struct minheap* heap, int key, int val) {
 	return changed;
 }
 /************************* END MINHEAP ***************************/
+
+/* ************ QUEUE ************** */
+struct int_queue {
+	unsigned int capacity; // max nr elements in q mem region
+	unsigned int front;
+	unsigned int back;
+	int*         q; // memory for queue data
+};
+
+struct int_queue* create_int_queue(void) {
+	struct int_queue* q = malloc(sizeof(struct int_queue));
+	q->capacity = 1024;
+	q->q = malloc(q->capacity * sizeof(int));
+	q->front = 0;
+	q->back = 0;
+	return q;
+}
+
+void destroy_int_queue(struct int_queue* q) {
+	if (q) {
+		free(q->q);
+		free(q);
+	}
+}
+
+unsigned int int_queue_size(struct int_queue* q) {
+	return (q->back + q->capacity - q->front) % q->capacity;
+}
+
+bool int_queue_isempty(struct int_queue* q) {
+	return q->back == q->front;
+}
+
+int int_queue_dequeue(struct int_queue* q) {
+	int e = q->q[q->front];
+	q->front = (q->front + 1) % q->capacity;
+	return e;
+}
+
+void int_queue_enqueue(struct int_queue* q, int e) {
+	if (int_queue_size(q) + 1 >= q->capacity) { // enlarge capcity
+		q->q = realloc(q->q, 2 * q->capacity * sizeof(int));
+		if (q->back < q->front) {
+			if (q->back > 0)
+				memcpy(q->q + q->capacity, q->q, q->back * sizeof(int));
+			q->back += q->capacity;
+		}
+		q->capacity *= 2;
+	}
+	q->q[q->back] = e;
+	q->back = (q->back + 1) % q->capacity;
+}
+/* ************ END QUEUE ************** */
+
 
 
 typedef int64_t word;
@@ -572,6 +626,45 @@ void explore_grid(struct grid* g, struct computer* comp, bool show) {
 	free(idx_stack);
 }
 
+int find_longest_pathlen(struct grid* g) {
+	int* pathlens = malloc(GRIDW * GRIDH * sizeof(int));
+	struct int_queue* q = create_int_queue();
+	for (int ii = 0; ii < GRIDW * GRIDH; ++ii)
+		pathlens[ii] = INT_MAX;
+
+	int x = g->target.x;
+	int y = g->target.y;
+	int idx = y * GRIDW + x;
+	pathlens[idx] = 0;
+	int_queue_enqueue(q, idx);
+	while (!int_queue_isempty(q)) {
+		idx = int_queue_dequeue(q);
+		x = idx % GRIDW;
+		y = idx / GRIDW;
+		for (int dir = 0; dir < 4; ++dir) {
+			int nx = x + dir2dx[dir];
+			int ny = y + dir2dy[dir];
+			if (nx >= 0 && nx < GRIDW && ny >= 0 && ny < GRIDH) {
+				int nidx = ny * GRIDW + nx;
+				if (g->grid[nidx] != WALL && pathlens[idx] + 1 < pathlens[nidx]) {
+					pathlens[nidx] = pathlens[idx] + 1;
+					int_queue_enqueue(q, nidx);
+				}
+			}
+		}
+	}
+	// printf("Pathlen to original droid start: %d\n", pathlens[(GRIDH/2) * GRIDW + (GRIDW/2)]);
+
+	// find longest
+	int maxlen = 0;
+	for (int ii = 0; ii < GRIDW * GRIDH; ++ii)
+		maxlen = (pathlens[ii] != INT_MAX && pathlens[ii] > maxlen) ? pathlens[ii] : maxlen;
+
+	destroy_int_queue(q);
+	free(pathlens);
+	return maxlen;
+}
+
 int main(int argc, char* argv[]) {
 	if (argc < 2) {
 		printf("Usage: %s progfile\n", argv[0]);
@@ -590,23 +683,13 @@ int main(int argc, char* argv[]) {
 	grid.target_known = false;
 
 	explore_grid(&grid, &comp, false);
-	int pathlen = 0;
 	if (!grid.target_known)
 		fprintf(stderr, "Target was not encountered\n");
 	else {
-		// find path from startpos to target
-		struct path_idx* path = find_path(&grid, startx, starty, grid.target.x, grid.target.y);
-		// mark path
-		while (path) { // walk path
-			++pathlen;
-			grid.grid[path->idx] = ON_PATH;
-			struct path_idx* p = path;
-			path = path->next;
-			free(p);
-		}
+		int maxlen = find_longest_pathlen(&grid);
+		printf("%d\n", maxlen);
 	}
 	//show_grid(&grid, 0);
-	printf("%d\n", pathlen);
 
 	destroy_computer(&comp);
 	return 0;
