@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 
 /* ************ QUEUE ************** */
 struct int_queue {
@@ -73,17 +74,22 @@ struct cell {
 	int       helper; // general algo helper
 };
 
+struct player {
+	int      posx;
+	int      posy;
+	uint32_t keys; // bitfield
+	int      totcost;
+};
+
 int dir2dx[] = {1, 0, -1, 0};
 int dir2dy[] = {0, -1, 0, 1};
 
 struct grid {
-	int          gridw;
-	int          gridh;
-	int          rowcapacity; // max nr of rows reserved in mem
-	struct cell* grid;
-	int          posx;
-	int          posy;
-	int          totcost;
+	int           gridw;
+	int           gridh;
+	int           rowcapacity; // max nr of rows reserved in mem
+	struct cell*  grid;
+	struct player you;
 };
 
 struct grid* create_grid() {
@@ -92,9 +98,10 @@ struct grid* create_grid() {
 	g->gridh = 0;
 	g->rowcapacity = 0;
 	g->grid = NULL;
-	g->posx = -1;
-	g->posy = -1;
-	g->totcost = 0;
+	g->you.posx = -1;
+	g->you.posy = -1;
+	g->you.keys = 0;
+	g->you.totcost = 0;
 	return g;
 }
 
@@ -138,15 +145,15 @@ bool grid_add_line(struct grid* g, char* line) {
 		g->grid[idx].cost = 0;
 		g->grid[idx].helper = -1;
 		if (line[col] == '@') {
-			g->posx = col;
-			g->posy = g->gridh;
+			g->you.posx = col;
+			g->you.posy = g->gridh;
 		}
 	}
 	++g->gridh;
 	return true;
 }
 
-void show_grid(struct grid* g) {
+void show_grid(struct grid* g, bool show_helper) {
 	for (int y = 0; y < g->gridh; ++y) {
 		for (int x = 0; x < g->gridw; ++x) {
 			int idx = y * g->gridw + x;
@@ -154,9 +161,9 @@ void show_grid(struct grid* g) {
 			char c = g->grid[idx].type == WALL ? '#' :
 			         g->grid[idx].type == KEY ? g->grid[idx].code + 'a' :
 			         g->grid[idx].type == DOOR ? g->grid[idx].code + 'A':
-			         (x == g->posx && y == g->posy) ? '@' :
+			         (x == g->you.posx && y == g->you.posy) ? '@' :
 			         '.';
-			if (c == '.' && g->grid[idx].helper >= 0)
+			if (show_helper && c == '.' && g->grid[idx].helper >= 0)
 				c = (g->grid[idx].helper % 10) + '0';
 			printf("%c", c);
 		}
@@ -274,6 +281,28 @@ bool find_dead_ends(struct grid* g) {
 	return changed;
 }
 
+void mark_distances_to_cell(struct grid* g, int from_idx) {
+	for (int ii = 0; ii < g->gridw * g->gridh; ++ii)
+		g->grid[ii].helper = INT_MAX; // distances
+
+	struct int_queue* q = create_int_queue();
+
+	int_queue_enqueue(q, from_idx);
+	g->grid[from_idx].helper = 0;
+
+	while (!int_queue_isempty(q)) {
+		int idx = int_queue_dequeue(q);
+		for (int dir = 0; dir < 4; ++dir) {
+			int nidx = idx + dir2dy[dir] * g->gridw + dir2dx[dir];
+			if (g->grid[nidx].type != WALL && g->grid[idx].helper + 1 < g->grid[nidx].helper) {
+				g->grid[nidx].helper = g->grid[idx].helper + 1;
+				int_queue_enqueue(q, nidx);
+			}
+		}
+	}
+	destroy_int_queue(q);
+}
+
 void get_reachable_stuff(struct grid* g, uint32_t* keys, uint32_t* doors) {
 	*keys = 0;
 	*doors = 0;
@@ -281,7 +310,7 @@ void get_reachable_stuff(struct grid* g, uint32_t* keys, uint32_t* doors) {
 	for (int ii = 0; ii < g->gridw * g->gridh; ++ii)
 		g->grid[ii].helper = false; // visited
 
-	int idx = g->posy * g->gridw + g->posy;
+	int idx = g->you.posy * g->gridw + g->you.posy;
 
 	struct int_queue* q = create_int_queue();
 	int_queue_enqueue(q, idx);
@@ -306,6 +335,7 @@ void get_reachable_stuff(struct grid* g, uint32_t* keys, uint32_t* doors) {
 	}
 	destroy_int_queue(q);
 }
+
 void show_keys_doors(uint32_t keys, uint32_t doors) {
 	printf("Keys:  ");
 	for (int ii = 0; keys; ++ii) {
@@ -326,7 +356,13 @@ void show_keys_doors(uint32_t keys, uint32_t doors) {
 	printf("\n");
 }
 
-/* TODO
+void grid_open_door(struct grid* g, int code) {
+	int door_idx;
+	for (door_idx = 0; door_idx < g->gridw * g->gridh; ++door_idx)
+		if (g->grid[door_idx].type == DOOR && g->grid[door_idx].code == code)
+			g->grid[door_idx].type = EMPTY;
+}
+
 void goto_key(struct grid* g, int keycode) {
 	int key_idx;
 	for (key_idx = 0; key_idx < g->gridw * g->gridh; ++key_idx)
@@ -336,49 +372,92 @@ void goto_key(struct grid* g, int keycode) {
 		printf("Error: key %c not found\n", keycode + 'a');
 		return;
 	}
-	// create path from key to you
-	for (int ii = 0; ii < g->gridw * g->gridh; ++ii)
-		g->grid[ii].helper = INT_MAX;
-	struct int_queue* q = create_int_queue();
-	int_queue_enqueue(q, key_idx);
-	g->grid[key_idx].helper = 0;
-	while (!int_queue_isempty(q)) {
-		int idx = int_queue_dequeue(q);
+	mark_distances_to_cell(g, key_idx);
+	// walk dist path in reverse, check encountered doors/keys
+	int idx = g->you.posy * g->gridw + g->you.posx;
+	int dist = g->grid[idx].helper;
+	while (dist) {
+		int nidx = -1;
 		for (int dir = 0; dir < 4; ++dir) {
 			int nidx = idx + dir2dy[dir] * g->gridw + dir2dx[dir];
-			if (g->grid[nidx].type != WALL && g->grid[idx].helper + 1 < g->grid[nidx].helper) {
-				g->grid[nidx].helper = g->grid[idx].helper + 1;
-				int_queue_enqueue(q, nidx);
+			if (g->grid[nidx].helper == dist - 1) {
+				--dist;
+				break;
 			}
 		}
+		if (g->grid[nidx].type == DOOR) {
+			printf("Stopped in my tracks by door %c\n", 'A' + g->grid[nidx].code);
+			break;
+		}
+		idx = nidx;
+		if (g->grid[nidx].type == KEY) {
+			printf("Picking up key %c", 'a' + g->grid[idx].code);
+			g->you.keys |= (1 << g->grid[idx].code);
+			grid_open_door(g, g->grid[idx].code);
+		}
 	}
-	// now walk along path
-	int idx = g->posy * g->gridw + g->posx;
-	while
+	g->you.posx = idx % g->gridw;
+	g->you.posy = idx / g->gridw;
 }
-*/
 
 int main(int argc, char* argv[]) {
-	struct grid* grid = create_grid();
+	struct grid* g = create_grid();
 
 	char *line = NULL;
 	size_t len = 0;
 	while (getline(&line, &len, stdin) != -1)
-		grid_add_line(grid, line);
+		grid_add_line(g, line);
 	free(line);
 
-	show_grid(grid);
+	show_grid(g, false);
 
+	for (int key_code = 0; key_code < 26; ++key_code) {
+		int key_idx;
+		for (key_idx = 0; key_idx < g->gridw * g->gridh; ++key_idx)
+			if (g->grid[key_idx].type == KEY && g->grid[key_idx].code == key_code)
+				break;
+		if (key_idx < g->gridw * g->gridh) {
+			printf("Key %c: ", 'a' + key_code);
+			mark_distances_to_cell(g, key_idx);
+			// walk dist path in reverse, check encountered doors/keys
+			int idx = g->you.posy * g->gridw + g->you.posx;
+			int dist = g->grid[idx].helper;
+			while (dist) {
+				for (int dir = 0; dir < 4; ++dir) {
+					int nidx = idx + dir2dy[dir] * g->gridw + dir2dx[dir];
+					if (g->grid[nidx].helper == dist - 1) {
+						idx = nidx;
+						--dist;
+						break;
+					}
+				}
+				if (g->grid[idx].type == DOOR)
+					printf("%c, ", 'A' + g->grid[idx].code);
+				/*
+				else if (g->grid[idx].type == KEY)
+					printf("%c, ", 'a' + g->grid[idx].code);
+				*/
+			}
+			printf("\n");
+		}
+	}
+
+	printf("Which key shall I grab? :  ");
+	char c = getchar();
+
+
+	/*
 	uint32_t keys, doors;
 	get_reachable_stuff(grid, &keys, &doors);
 	show_keys_doors(keys, doors);
 
 	while (find_dead_ends(grid))
-		show_grid(grid);
+		show_grid(grid, true);
 
 	get_reachable_stuff(grid, &keys, &doors);
 	show_keys_doors(keys, doors);
+	*/
 
-	destroy_grid(grid);
+	destroy_grid(g);
 	return 0;
 }
