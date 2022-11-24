@@ -5,22 +5,29 @@
 
 #define ABS(x) ((x)>0?(x):-(x))
 
-int dir2dx[] = {1, 0, -1, 0};
-int dir2dy[] = {0, -1, 0, 1};
-
-int rotate(int dir, int deg) {
+void rotate(int deg, int* x, int* y) {
 	int q = deg / 90;
-	if (q * 90 != deg) {
+	if (q * 90 != deg)
 		fprintf(stderr, "%d not multiple of 90\n", deg);
-		return dir;
+	else {
+		q = (q + 4) % 4;
+		// rotate by 90 deg q times
+		for (int r = 0; r < q; ++r) {
+			// (x,y) := (y, -x)
+			int t = *x;
+			*x = *y;
+			*y = -t;
+		}
 	}
-	return ((dir + 4 + q) % 4);
 }
 
 int main(int argc, char* argv[]) {
 	int x = 0;
 	int y = 0;
-	int dir = 0;
+
+	// waypoint
+	int wpx = 10;
+	int wpy = -1;
 
 	char *line = NULL;
 	size_t len = 0;
@@ -35,20 +42,20 @@ int main(int argc, char* argv[]) {
 		}
 		switch (instr) {
 			case 'N':
-				y -= amount; break;
+				wpy -= amount; break;
 			case 'E':
-				x += amount; break;
+				wpx += amount; break;
 			case 'S':
-				y += amount; break;
+				wpy += amount; break;
 			case 'W':
-				x -= amount; break;
+				wpx -= amount; break;
 			case 'L':
-				dir = rotate(dir, amount); break;
+				rotate(amount, &wpx, &wpy); break;
 			case 'R':
-				dir = rotate(dir, -amount); break;
+				rotate(-amount, &wpx, &wpy); break;
 			case 'F':
-				x += amount * dir2dx[dir];
-				y += amount * dir2dy[dir];
+				x += amount * wpx;
+				y += amount * wpy;
 				break;
 			default:
 				printf("Invalid instruction `%c`\n", instr);
