@@ -13,6 +13,8 @@
 // maximum number of rule ids in one subrule:
 #define MAX_RULES_PER_SUBRULE 3
 
+#define MAX_SEQLEN 128 /* prevent endless loop in cycle */
+
 struct subrule {
 	char leaf_char; // 'a', 'b', or '\0' if not leaf node
 	int  rule_id[MAX_RULES_PER_SUBRULE]; // 0 if no rule[] given
@@ -58,7 +60,7 @@ void read_subrule(char **pLine, struct subrule* sr) {
 	*pLine = l;
 }
 
-void read_rule(char* l, struct rule* r) {
+void read_rule(char *l, struct rule* r) {
 	// id: already skipped
 	memset(r, 0, sizeof(struct rule)); // init all fields to 0
 	int subrule_idx = 0;
@@ -119,7 +121,7 @@ bool match_subrule(char* str, int len, struct rule* rules, struct subrule* sr, i
 		return false;
 
 	struct rule* r = &rules[sr->rule_id[sr_startidx]];
-	for (int l = r->minlen; l <= r->maxlen; ++l) { // try to match all possible lengths of first rule
+	for (int l = r->minlen; l <= r->maxlen && l <= len; ++l) { // try to match all possible lengths of first rule
 		if (match_rule(str, l, rules, sr->rule_id[sr_startidx]) && match_subrule(str + l, len - l, rules, sr, sr_startidx + 1))
 			return true;
 	}
@@ -127,6 +129,7 @@ bool match_subrule(char* str, int len, struct rule* rules, struct subrule* sr, i
 }
 
 bool match_rule(char* str, int len, struct rule* rules, int id) {
+	// printf("match_rule(%s, len=%d, ..., rule#: %d)\n", str, len, id);
 	// returns true when first len chars of str can be matched exactly by rule #id
 	struct rule* rule = &rules[id];
 	if (len < rule->minlen || len > rule->maxlen)
@@ -146,21 +149,26 @@ bool match_rule(char* str, int len, struct rule* rules, int id) {
 	return false;
 }
 
-void rule_minmaxlen(struct rule* rules, int id) {
+void rule_minmaxlen(struct rule* rules, int id, int depth) {
 	// dynamic programming: rules array remembers min/max when found (memoization in rules itself)
 	struct rule* rule = &rules[id];
 	// memoized case
 	if (rule->minlen > 0 && rule->maxlen > 0)
 		return; // already done
+	if (depth >= MAX_SEQLEN) {
+		rule->minlen = MAX_SEQLEN; // will be corrected later in recursive algo
+		rule->maxlen = MAX_SEQLEN;
+		return;
+	}
 	// base case: char match
 	if (rule->subrule[0].leaf_char) {
 		rule->minlen = 1;
 		rule->maxlen = 1;
 	}
 	else {
-		rule->minlen = INT_MAX;
-		rule->maxlen = 0;
 		// go over all subrules
+		int minsofar = INT_MAX;
+		int maxsofar = 0;
 		for (int sr_idx = 0; sr_idx < MAX_SUBRULES_PER_RULE && is_subrule(&rule->subrule[sr_idx]); ++sr_idx) {
 			// determine min/max for each subrule
 			int minl_tot = 0;
@@ -172,13 +180,16 @@ void rule_minmaxlen(struct rule* rules, int id) {
 				if (!rid)
 					break;
 				struct rule* r = &rules[rid];
-				rule_minmaxlen(rules, rid); // get min and max len for rule[rid]
+				rule_minmaxlen(rules, rid, depth + 1); // get min and max len for rule[rid]
 				minl_tot += r->minlen;
 				maxl_tot += r->maxlen;
+				maxl_tot = maxl_tot > MAX_SEQLEN ? MAX_SEQLEN : maxl_tot;
 			}
-			rule->minlen = minl_tot < rule->minlen ? minl_tot : rule->minlen;
-			rule->maxlen = maxl_tot > rule->maxlen ? maxl_tot : rule->maxlen;
+			minsofar = minl_tot < minsofar ? minl_tot : minsofar;
+			maxsofar = maxl_tot > maxsofar ? maxl_tot : maxsofar;
 		}
+		rule->minlen = minsofar;
+		rule->maxlen = maxsofar;
 	}
 	// printf("minmax for rule %d: %d - %d\n", id, rule->minlen, rule->maxlen);
 }
@@ -203,10 +214,14 @@ int main(int argc, char* argv[]) {
 		++l; // skip colon
 		read_rule(l, rules + id);
 	}
-	//print_rules(rules);
+	// replace rules 8 and 11
+	read_rule("42 | 42 8", rules + 8);
+	read_rule("42 31 | 42 11 31", rules + 11);
+	
+	// print_rules(rules);
 
 	// init minlen/maxlen data for algo speed-up
-	rule_minmaxlen(rules, 0);
+	rule_minmaxlen(rules, 0, 0); // last 0: depth fro cycle detection
 	//printf("%d - %d\n", rules[0].minlen, rules[0].maxlen);
 
 	int count = 0;
