@@ -10,6 +10,8 @@
 
 #define MAX_NAMES MAX_VERTICES
 
+#define MAX_PLAYERS 2
+
 struct edge {
 	int to; // idx of vertex this edge ends at
 	int len;
@@ -201,56 +203,39 @@ struct graph* simplify_graph(struct graph* g_in, int startidx) {
 	return g_out;
 }
 
-void print_spaces(int n) {
-	while (n--) printf(" ");
-}
-
-int find_max_reward(struct graph* g, int turns_left, int target[], int eta[], int debug_depth) {
-	// target[0],target[1] contains targets of players
-	// eta[] is how many turns left to reach target
-	int max_reward = 0;
-
-	// player to reach target
-	int player = (target[0] != -1 && eta[0] == 0) ? 0 : 1;
-	struct vertex* vcur = &g->vertex[target[player]]; // convenience variable
-	int this_reward = vcur->flow * turns_left;
-	print_spaces(debug_depth);
-	printf("t=%2d: player %d arriving at %s, getting %d\n", 26 - turns_left, player, vcur->name, this_reward);
-
-	// pick next target for player
+int find_max_reward(struct graph* g, int nr_players, int posidx[], int turns_left[]) {
+	int player = 0;
+	while (turns_left[player] == 0 && player < nr_players)
+		++player;
+	if (player == nr_players)
+		return 0;
+	struct vertex* vcur = &g->vertex[posidx[player]];
 	// iterate over all edges leading to a closed flow node
-	bool new_target_found = false; // if no target found, we still have to kick off recursion for other player
+	int max_reward = 0;
+	// option 1: player stops, and lets next player continue
+	if (player + 1 < nr_players) { // next player
+		int turnsleft_bu = turns_left[player]; // for undo
+		turns_left[player] = 0;
+		max_reward = find_max_reward(g, nr_players, posidx, turns_left);
+		turns_left[player] = turnsleft_bu;
+	}
+	// option 2: this player makes at least one more move
 	for (int e_idx = 0; e_idx < vcur->nr_edges; ++e_idx) {
-		struct edge* e = &vcur->edge[e_idx]; // convenience variable
-		struct vertex* vto = &g->vertex[e->to]; // convenience variable
-		if (vto->flow && !vto->open && e->len + 1 < turns_left) { // otherwise no point in going there
-			new_target_found = true;
+		struct edge* e = &vcur->edge[e_idx];
+		struct vertex* vto = &g->vertex[e->to];
+		if (vto->flow && !vto->open && e->len + 1 < turns_left[player]) { // otherwise no point in going there
 			// follow edge, then recurse, then undo
 			vto->open = true;
-			target[player] = e->to;
-			eta[player] = e->len + 1;
-			printf("  Sending player %d to %s, to arrive at t=%d\n", player, g->vertex[e->to].name,
-					26 - (turns_left - eta[player]));
-			// next time stamp
-			int min_eta = eta[player];
-			if (target[1 - player] != -1 && eta[1 - player] < min_eta)
-				min_eta = eta[1 - player];
-			eta[0] -= min_eta;
-			eta[1] -= min_eta;
-			int turns_left_next = turns_left - min_eta;
-			int reward = this_reward + find_max_reward(g, turns_left_next, target, eta);
+			int pos_bu = posidx[player]; // for undo
+			int turnsleft_bu = turns_left[player]; // for undo
+			posidx[player] = e->to;
+			turns_left[player] -= e->len + 1;
+			int reward = turns_left[player] * vto->flow + find_max_reward(g, nr_players, posidx, turns_left);
 			max_reward = reward > max_reward ? reward : max_reward;
 			// undo
+			posidx[player] = pos_bu;
+			turns_left[player] = turnsleft_bu;
 			vto->open = false;
-			eta[1 - player] += min_eta;
-		}
-	}
-	if (!new_target_found) { // recursion for other player
-		target[player] = -1;
-		if (target[1 - player] != -1) {
-			int turns_left_next = turns_left - eta[1 - player];
-			eta[1 - player] = 0;
-			max_reward = this_reward + find_max_reward(g, turns_left_next, target, eta);
 		}
 	}
 	return max_reward;
@@ -267,10 +252,12 @@ int main(int argc, char* argv[]) {
 	free(g_in);
 	// show_graph(g);
 
-	int turns_left = 26;
-	int target[2] = {0}; // both target start pos
-	int eta[2] = {0}; // already there
-	int max_reward = find_max_reward(g, turns_left, target, eta);
+	int curidx[MAX_PLAYERS] = {0}; // start node by design
+	int players = 2;
+	int turns_left[MAX_PLAYERS] = {0};
+	for (int ii = 0; ii < players; ++ii)
+		turns_left[ii] = 30 - 4 * (players - 1);
+	int max_reward = find_max_reward(g, players, curidx, turns_left);
 	printf("%d\n", max_reward);
 
 	free(g);
