@@ -61,6 +61,7 @@ uint64_t count_stones(uint64_t x, int steps_left) {
 
 int main(int argc, char* argv[]) {
 	int steps = 25;
+	if (argc > 1) steps = atoi(argv[1]);
 
 	char *line = NULL;
 	size_t len = 0;
