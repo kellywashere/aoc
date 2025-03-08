@@ -235,7 +235,7 @@ bool minheap_update_key_of_val(struct minheap* heap, int key, int val) {
 // Heuristic for A-star
 // TODO: give facing info as param
 int hscore(struct grid* g, int x, int y) {
-	int h = ABS(x - g->endpos.x) + ABS(x - g->endpos.y);
+	int h = ABS(x - g->endpos.x) + ABS(y - g->endpos.y);
 	h *= MOVE_COST;
 	if (x != g->endpos.x && y != g->endpos.y) // at least one rotation needed
 		h += ROTATION_COST;
