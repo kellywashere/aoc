@@ -239,7 +239,7 @@ int hscore(struct grid* g, int x, int y) {
 	h *= MOVE_COST;
 	if (x != g->endpos.x && y != g->endpos.y) // at least one rotation needed
 		h += ROTATION_COST;
-	return 0;
+	return h;
 }
 
 #define NR_FACING 2 /* East-West, or North-South */
