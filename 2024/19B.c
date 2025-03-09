@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
+#include <inttypes.h>
 
 #include <assert.h>
 
@@ -50,31 +51,30 @@ int cmp_towels(const void* pa, const void* pb) {
 	return strncmp(ta->pat, tb->pat, MAX_TOWEL_LEN + 1);
 }
 
-bool can_make_rec(char* design, size_t design_len, struct towel* pat, size_t pat_sz, bool* lut) {
-	// lut[design_len] false --> we have already seen this design to be impossible
+int64_t count_make_rec(char* design, size_t design_len, struct towel* pat, size_t pat_sz, int64_t* lut) {
 	if (design_len == 0)
-		return true;
-	if (!lut[design_len])
-		return false;
-	// TODO: create array of start indices in pat, so we can quickly match first symbol
+		return 1;
+	if (lut[design_len] != -1)
+		return lut[design_len];
+	int64_t count = 0;
 	for (size_t ii = 0; ii < pat_sz; ++ii) {
 		assert(pat[ii].sz > 0);
-		if (strncmp(design, pat[ii].pat, pat[ii].sz) == 0 &&
-		    can_make_rec(design + pat[ii].sz, design_len - pat[ii].sz, pat, pat_sz, lut))
-				return true;
+		if (strncmp(design, pat[ii].pat, pat[ii].sz) == 0) {
+		    count += count_make_rec(design + pat[ii].sz, design_len - pat[ii].sz, pat, pat_sz, lut);
+		}
 	}
-	lut[design_len] = false;
-	return false;
+	lut[design_len] = count;
+	return count;
 }
 
-bool can_make(char* design, size_t design_len, struct towel* pat, size_t pat_sz) {
+int64_t count_make(char* design, size_t design_len, struct towel* pat, size_t pat_sz) {
 	// init lut for memoization
-	// lut[ii]==false says that if we have ii characters left,
-	// we already know that to be impossible
-	bool* lut = malloc((design_len + 1) * sizeof(bool));
+	// lut[ii] says how many ways we can make last ii symbols of design
+	// -1 means "we don't know yet"
+	int64_t* lut = malloc((design_len + 1) * sizeof(int64_t));
 	for (int ii = 0; ii < design_len + 1; ++ii)
-		lut[ii] = true;
-	return can_make_rec(design, design_len, pat, pat_sz, lut);
+		lut[ii] = -1;
+	return count_make_rec(design, design_len, pat, pat_sz, lut);
 }
 
 int main(int argc, char* argv[]) {
@@ -94,21 +94,21 @@ int main(int argc, char* argv[]) {
 		towels[towels_sz].sz = strlen(towels[towels_sz].pat);
 		++towels_sz;
 	}
-	qsort(towels, towels_sz, sizeof(struct towel), cmp_towels); // not rly needed, maybe to speed things up further
+	qsort(towels, towels_sz, sizeof(struct towel), cmp_towels);
 
 	// process designs
-	int count = 0;
+	int64_t count = 0;
 	char buf[MAX_DESIGN_LEN + 1] = {0};
 	while (getline(&line, &len, stdin) != -1) {
 		if (empty_line(line))
 			continue;
 		l = line;
 		read_pattern(&l, buf, MAX_DESIGN_LEN + 1);
-		bool possible = can_make(buf, strlen(buf), towels, towels_sz);
-		count += possible  ? 1 : 0;
+		int64_t this_count = count_make(buf, strlen(buf), towels, towels_sz);
+		count += this_count;
 	}
 
-	printf("%d\n", count);
+	printf("%" PRIi64 "\n", count);
 
 	free(line);
 	return 0;
