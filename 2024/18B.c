@@ -259,7 +259,7 @@ int find_target(struct grid* g) {
 		//fscore[ii] = INT_MAX;
 	}
 
-	int idx = g->startpos.y * w + g->startpos.x; // current state: Endpos (reverse search!)
+	int idx = g->startpos.y * w + g->startpos.x;
 	gscore[idx] = 0;
 	//fscore[idx] = hscore(g, g->startpos.x, g->startpos.y)
 	fscore = hscore(g, g->startpos.x, g->startpos.y);

@@ -4,6 +4,12 @@
 #include <ctype.h>
 #include <limits.h>
 
+// term colors
+#define COL_RESET "\e[0m"
+#define RED "\e[0;31m"
+#define GRN "\e[0;32m"
+#define YEL "\e[0;33m"
+
 #define ABS(x) ((x)<0?(-(x)):(x))
 
 struct cell {
@@ -18,17 +24,19 @@ struct vec2 {
 struct grid {
 	int           w;
 	int           h;
+	int           rowcapacity; // max nr of rows reserved in mem
 	struct cell*  grid;
 
 	struct vec2   startpos;
 	struct vec2   endpos;
 };
 
-struct grid* create_grid(int w, int h) {
+struct grid* create_grid() {
 	struct grid* g = malloc(sizeof(struct grid));
-	g->w = w;
-	g->h = h;
-	g->grid = calloc(w * h, sizeof(struct cell));
+	g->w = 0;
+	g->h = 0;
+	g->rowcapacity = 0;
+	g->grid = NULL;
 	return g;
 }
 
@@ -39,15 +47,55 @@ void destroy_grid(struct grid* g) {
 	}
 }
 
-void show_grid(struct grid* g) {
+void grid_add_line(struct grid* g, char* line) {
+	// find line width
+	int lw = 0;
+	while (line[lw] && !isspace(line[lw]))
+		++lw;
+	if (g->w > 0 && g->w != lw) {
+		fprintf(stderr, "Line width inconsistency\n");
+		return;
+	}
+	if (!g->grid) {
+		g->w = lw;
+		g->h = 0;
+		g->rowcapacity = lw; // assume square
+		g->grid = calloc(g->w * g->rowcapacity, sizeof(struct cell));
+	}
+	if (g->h >= g->rowcapacity) {
+		g->grid = realloc(g->grid, g->w * 2 * g->rowcapacity * sizeof(struct cell));
+		g->rowcapacity *= 2;
+	}
+	for (int col = 0; col < g->w; ++col) {
+		char c = line[col];
+		if (c == 'S') {
+			g->startpos.x = col;
+			g->startpos.y = g->h;
+		}
+		else if (c == 'E') {
+			g->endpos.x = col;
+			g->endpos.y = g->h;
+		}
+		g->grid[col + g->h * g->w].iswall = c == '#';
+	}
+	++g->h;
+}
+
+void show_grid(struct grid* g, int* gscore) {
 	for (int y = 0; y < g->h; ++y) {
 		for (int x = 0; x < g->w; ++x) {
-			char c = g->grid[y * g->w + x].iswall ? '#' : '.';
+			int idx = y * g->w + x;
+			char c = g->grid[idx].iswall ? '#' : '.';
 			if (g->startpos.x == x && g->startpos.y == y)
-				c = 'S';
+				printf(RED "S" COL_RESET);
 			else if (g->endpos.x == x && g->endpos.y == y)
-				c = 'E';
-			printf("%c", c);
+				printf(RED "E" COL_RESET);
+			else {
+				if (gscore && gscore[idx] < INT_MAX)
+					printf(YEL "%d" COL_RESET, gscore[idx] % 10);
+				else
+					printf("%c", c);
+			}
 		}
 		printf("\n");
 	}
@@ -191,8 +239,8 @@ int hscore(struct grid* g, int x, int y) {
 int dir2dx[]         = {1, 0, -1, 0};
 int dir2dy[]         = {0, -1, 0, 1};
 
-int find_target(struct grid* g) {
-	// A-star search algo
+int* find_distances(struct grid* g) {
+	// Dijkstra (we need to visit all nodes anyway, no need for heuristics)
 	// nodes are (x,y), encoded in integer:
 	// y * w + x  (0<=y<h, 0<=x<w)
 	int w = g->w;
@@ -200,46 +248,38 @@ int find_target(struct grid* g) {
 
 	struct minheap* open_set = create_minheap();
 	int* gscore = malloc(w * h * sizeof(int));
-	//int* fscore = malloc(w * h * sizeof(int)); // No need since it is key of open_set
 	int fscore;
 	for (int ii = 0; ii < w * h; ++ii) {
 		gscore[ii] = INT_MAX;
-		//fscore[ii] = INT_MAX;
 	}
 
-	int idx = g->startpos.y * w + g->startpos.x;
+	int idx = g->endpos.y * w + g->endpos.x; // current state: Endpos (reverse search!)
 	gscore[idx] = 0;
 	//fscore[idx] = hscore(g, g->startpos.x, g->startpos.y)
-	fscore = hscore(g, g->startpos.x, g->startpos.y);
+	fscore = 0; // g + h
 
 	minheap_insert(open_set, fscore, idx);
 
-	int cost = INT_MAX;
-	while (cost == INT_MAX && open_set->size) {
+	while (open_set->size) {
 		minheap_extract(open_set, &idx);
 		int y = idx / w;
 		int x = idx % w;
-		if (x == g->endpos.x && y == g->endpos.y) {
-			cost = gscore[idx]; // we're done here!
-		}
-		else {
-			// for each neighbor of current
-			for (int dir = 0; dir < 4; ++dir) { // 4 neighboring cells
-				int nx = x + dir2dx[dir];
-				int ny = y + dir2dy[dir];
-				if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-					int nidx = ny * w + nx;
-					// check if we can travel to neighbor
-					if (!g->grid[nidx].iswall) {
-						int tentative_gscore = gscore[idx] + 1;
-						if (tentative_gscore < gscore[nidx]) {
-							gscore[nidx] = tentative_gscore;
-							fscore = tentative_gscore + hscore(g, nx, ny);
-							if (!minheap_contains_val(open_set, nidx))
-								minheap_insert(open_set, fscore, nidx);
-							else
-								minheap_update_key_of_val(open_set, fscore, nidx); // Nasty...
-						}
+		// for each neighbor of current
+		for (int dir = 0; dir < 4; ++dir) { // 4 neighboring cells
+			int nx = x + dir2dx[dir];
+			int ny = y + dir2dy[dir];
+			if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+				int nidx = ny * w + nx;
+				// check if we can travel to neighbor
+				if (!g->grid[nidx].iswall) {
+					int tentative_gscore = gscore[idx] + 1;
+					if (tentative_gscore < gscore[nidx]) {
+						gscore[nidx] = tentative_gscore;
+						fscore = tentative_gscore;
+						if (!minheap_contains_val(open_set, nidx))
+							minheap_insert(open_set, fscore, nidx);
+						else
+							minheap_update_key_of_val(open_set, fscore, nidx); // Nasty...
 					}
 				}
 			}
@@ -247,52 +287,51 @@ int find_target(struct grid* g) {
 	}
 
 	destroy_minheap(open_set);
-	return cost;
+	return gscore;
 }
 
-bool read_int(const char** pLine, int* x) {
-	int num = 0;
-	const char* line = *pLine;
-	while (*line && !isdigit(*line))
-		++line;
-	if (!isdigit(*line))
-		return false;
-	while (isdigit(*line)) {
-		num = num * 10 + *line - '0';
-		++line;
+int find_cheats(struct grid* g) {
+	int count = 0;
+	int* dist_to_end = find_distances(g);
+	for (int y = 1; y < g->h - 1; ++y) { // avoid edge
+		for (int x = 1; x < g->w - 1; ++x) {
+			int idx = x + y * g->w;
+			if (dist_to_end[idx] == INT_MAX)
+				continue;
+			// find any number that is 2 steps away with a distance delta to this cell >2
+			for (int y2 = y - 20; y2 <= y + 20; ++y2) {
+				if (y2 <= 0 || y2 >= g->h - 1) continue;
+				for (int x2 = x - 20; x2 <= x + 20; ++x2) {
+					if (x2 <= 0 || x2 >= g->w - 1) continue;
+					int idx2 = x2 + y2 * g->w;
+					if (dist_to_end[idx2] == INT_MAX) continue;
+					int d = ABS(x2 - x) + ABS(y2 - y);
+					if (d > 20) continue;
+					int gain = dist_to_end[idx2] - dist_to_end[idx] - d;
+					// if (gain > 0) {
+					// 	printf("Cheat found: %d\n", gain);
+					// }
+					count += gain >= 100 ? 1 : 0; // problem cut-off
+				}
+			}
+		}
 	}
-	*x = num;
-	*pLine = line;
-	return true;
+
+	free(dist_to_end);
+	return count;
 }
 
 int main(int argc, char* argv[]) {
-
-	int w = argc > 1 ? atoi(argv[1]) : 71;
-	int h = argc > 2 ? atoi(argv[2]) : 71;
-	int maxlines = argc > 3 ? atoi(argv[3]) : 1024;
-	struct grid* grid = create_grid(w, h);
-
+	struct grid* grid = create_grid();
 	char *line = NULL;
 	size_t len = 0;
-	int linesread = 0;
-	while (linesread < maxlines && getline(&line, &len, stdin) != -1) {
-		int x, y;
-		const char* l = line;
-		read_int(&l, &x);
-		read_int(&l, &y);
-		grid->grid[x + y * grid->w].iswall = true;
-		++linesread;
+	while (getline(&line, &len, stdin) != -1) {
+		grid_add_line(grid, line);
 	}
 	free(line);
 
-	grid->startpos = (struct vec2){0, 0};
-	grid->endpos   = (struct vec2){grid->w - 1, grid->h - 1};
-
-	// show_grid(grid);
-
-	int cost = find_target(grid);
-	printf("%d\n", cost);
+	int count = find_cheats(grid);
+	printf("%d\n", count);
 
 	destroy_grid(grid);
 	return 0;
